@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* RidgeTheory — blue palette */
+    --background: 213 40% 97%;
+    --foreground: 218 55% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 218 55% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 218 55% 10%;
+    --primary: 217 91% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 213 40% 93%;
+    --secondary-foreground: 217 55% 20%;
+    --muted: 213 35% 94%;
+    --muted-foreground: 215 20% 48%;
+    --accent: 213 60% 90%;
+    --accent-foreground: 217 65% 25%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 213 30% 87%;
+    --input: 213 30% 87%;
+    --ring: 217 91% 48%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 220 40% 7%;
+    --foreground: 213 40% 96%;
+    --card: 220 38% 10%;
+    --card-foreground: 213 40% 96%;
+    --popover: 220 38% 10%;
+    --popover-foreground: 213 40% 96%;
+    --primary: 217 91% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 30% 16%;
+    --secondary-foreground: 213 40% 90%;
+    --muted: 220 30% 16%;
+    --muted-foreground: 215 20% 60%;
+    --accent: 220 35% 20%;
+    --accent-foreground: 213 40% 90%;
+    --destructive: 0 62.8% 42%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 28% 18%;
+    --input: 220 28% 18%;
+    --ring: 217 91% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    @apply outline-none;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
