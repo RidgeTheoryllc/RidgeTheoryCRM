@@ -88,14 +88,24 @@ function Sel({
 
 type SaveResult = void | Promise<unknown>
 
-function Actions({ onClose, onSave }: { onClose: () => void; onSave: () => SaveResult }) {
+function Actions({
+  onClose,
+  onSave,
+  saveLabel = 'Save',
+  saveDisabled = false,
+}: {
+  onClose: () => void
+  onSave: () => SaveResult
+  saveLabel?: string
+  saveDisabled?: boolean
+}) {
   return (
     <div className="flex justify-end gap-2 mt-2">
-      <Button onClick={onClose} variant="outline">
+      <Button onClick={onClose} variant="outline" disabled={saveDisabled}>
         Cancel
       </Button>
-      <Button onClick={onSave}>
-        Save
+      <Button onClick={onSave} disabled={saveDisabled}>
+        {saveLabel}
       </Button>
     </div>
   )
@@ -214,25 +224,31 @@ export function LeadForm({ initial = {}, onSave, onClose, title = 'Add lead' }: 
   const [status, setStatus] = useState<LeadStatus>(initial.status ?? 'Generated')
   const [notes, setNotes] = useState(initial.notes ?? '')
   const [tags, setTags] = useState<string[]>(initial.tags ?? [])
+  const [saving, setSaving] = useState(false)
 
   async function save() {
-    if (!name.trim()) return
-    await onSave({
-      name,
-      title: leadTitle,
-      email,
-      phone,
-      company_name: companyName,
-      website,
-      source,
-      ingestion_source: ingestionSource,
-      status,
-      notes,
-      tags,
-      company_id: initial.company_id ?? null,
-      contact_id: initial.contact_id ?? null,
-    })
-    onClose()
+    if (!name.trim() || saving) return
+    setSaving(true)
+    try {
+      await onSave({
+        name,
+        title: leadTitle,
+        email,
+        phone,
+        company_name: companyName,
+        website,
+        source,
+        ingestion_source: ingestionSource,
+        status,
+        notes,
+        tags,
+        company_id: initial.company_id ?? null,
+        contact_id: initial.contact_id ?? null,
+      })
+      onClose()
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -264,7 +280,7 @@ export function LeadForm({ initial = {}, onSave, onClose, title = 'Add lead' }: 
         />
       </Field>
       <Field label="Tags"><TagInput value={tags} onChange={setTags} /></Field>
-      <Actions onClose={onClose} onSave={save} />
+      <Actions onClose={onClose} onSave={save} saveLabel={saving ? 'Verifying email…' : 'Save'} saveDisabled={saving} />
     </Modal>
   )
 }

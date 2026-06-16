@@ -112,6 +112,9 @@ create table if not exists leads (
   rank_tier text default 'low',
   signal text default '',
   pain_theme text default '',
+  email_status text,
+  email_valid boolean,
+  email_validated_at timestamptz,
   company_id uuid references companies(id) on delete set null,
   contact_id uuid references contacts(id) on delete set null,
   created_at timestamptz default now()

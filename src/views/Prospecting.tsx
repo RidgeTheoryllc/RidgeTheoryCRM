@@ -49,6 +49,7 @@ function getPageNumbers(current: number, total: number): (number | 'ellipsis')[]
 
 export function Prospecting({ crm }: { crm: CRMStore }) {
   const [busyTask, setBusyTask] = useState<string | null>(null)
+  const [generatingTaskId, setGeneratingTaskId] = useState<string | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [selectedEmailIds, setSelectedEmailIds] = useState<Set<string>>(new Set())
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
@@ -132,7 +133,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     const lead = getLead(task)
     if (!lead) return
 
-    setBusyTask(task.id)
+    setGeneratingTaskId(task.id)
     setMessage(null)
     try {
       const data = await requestDraft(lead, task)
@@ -145,7 +146,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Draft generation failed.')
     } finally {
-      setBusyTask(null)
+      setGeneratingTaskId(null)
     }
   }
 
@@ -191,6 +192,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
       for (const task of targets) {
         const lead = getLead(task)
         if (!lead) continue
+        setGeneratingTaskId(task.id)
         setMessage(`Generating drafts… ${done + 1} of ${targets.length}`)
         const data = await requestDraft(lead, task)
         await crm.updateSequenceTask(task.id, {
@@ -204,6 +206,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Bulk generate failed.')
     } finally {
+      setGeneratingTaskId(null)
       setBulkBusy(false)
     }
   }
@@ -468,6 +471,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
                       task={expandedTask}
                       lead={getLead(expandedTask)}
                       busy={busyTask === expandedTask.id || bulkBusy}
+                      generating={generatingTaskId === expandedTask.id}
                       onGenerate={() => generateDraft(expandedTask)}
                       onSend={() => sendEmail(expandedTask)}
                     />
@@ -496,7 +500,8 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
                           task={task}
                           lead={getLead(task)}
                           expanded={expandedTaskId === task.id}
-                          busy={busyTask === task.id}
+                          busy={busyTask === task.id || generatingTaskId === task.id}
+                          generating={generatingTaskId === task.id}
                           onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                           onGenerate={() => generateDraft(task)}
                           onDone={() => markDone(task)}
@@ -651,12 +656,14 @@ function EmailPreviewPanel({
   task,
   lead,
   busy,
+  generating,
   onGenerate,
   onSend,
 }: {
   task: SequenceTask
   lead?: Lead
   busy: boolean
+  generating: boolean
   onGenerate: () => void
   onSend: () => void
 }) {
@@ -686,12 +693,14 @@ function EmailPreviewPanel({
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         <Button onClick={onGenerate} variant="outline" size="sm" disabled={busy}>
-          <Sparkles className="h-3.5 w-3.5" />
-          {task.generated_body ? 'Regenerate' : 'Generate'}
+          {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {generating
+            ? (task.generated_body ? 'Regenerating…' : 'Generating…')
+            : (task.generated_body ? 'Regenerate' : 'Generate')}
         </Button>
         <Button onClick={onSend} size="sm" disabled={busy || !ready}>
-          <Send className="h-3.5 w-3.5" />
-          Send email
+          {busy && !generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          {busy && !generating ? 'Sending…' : 'Send email'}
         </Button>
       </div>
     </div>
@@ -703,6 +712,7 @@ function ManualTaskRow({
   lead,
   expanded,
   busy,
+  generating,
   onToggle,
   onGenerate,
   onDone,
@@ -711,6 +721,7 @@ function ManualTaskRow({
   lead?: Lead
   expanded: boolean
   busy: boolean
+  generating: boolean
   onToggle: () => void
   onGenerate: () => void
   onDone: () => void
@@ -745,8 +756,10 @@ function ManualTaskRow({
             <p className="mt-2 text-sm text-muted-foreground">No script generated yet.</p>
           )}
           <Button onClick={onGenerate} variant="outline" size="sm" className="mt-2" disabled={busy}>
-            <Sparkles className="h-3.5 w-3.5" />
-            {task.generated_script ? 'Regenerate' : 'Generate'}
+            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {generating
+              ? (task.generated_script ? 'Regenerating…' : 'Generating…')
+              : (task.generated_script ? 'Regenerate' : 'Generate')}
           </Button>
         </div>
       )}

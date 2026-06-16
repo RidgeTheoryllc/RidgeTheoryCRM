@@ -21,6 +21,7 @@ import type {
 import { STAGE_PROBABILITY } from '@/types'
 import { scoreLead } from '@/lib/leadScoring'
 import { advanceLeadStatus, resolveNewLeadStatus } from '@/lib/leadStatus'
+import { appendCleansingNote, statusAfterEmailCleansing, verifyLeadEmail } from '@/lib/emailCleansing'
 import { buildSequenceTask, getSequenceTemplate } from '@/lib/prospecting'
 
 function isTerminalTaskStatus(status: SequenceTaskStatus) {
@@ -173,8 +174,30 @@ export function useCRM(profile?: Profile | null) {
 
   // ── Leads ──────────────────────────────────────────────────
   const addLead = useCallback(async (data: Omit<Lead, 'id' | 'created_at'>) => {
-    const status = resolveNewLeadStatus(data.status, data.ingestion_source)
-    const scored = { ...data, status, ...scoreLead({ ...data, status } as Lead) }
+    let status = resolveNewLeadStatus(data.status, data.ingestion_source)
+    let enriched: Omit<Lead, 'id' | 'created_at'> = { ...data, status }
+
+    const email = data.email?.trim()
+    if (email) {
+      try {
+        const cleansing = await verifyLeadEmail(email)
+        if (cleansing) {
+          status = statusAfterEmailCleansing(status, cleansing.valid)
+          enriched = {
+            ...enriched,
+            status,
+            email_status: cleansing.status,
+            email_valid: cleansing.valid,
+            email_validated_at: cleansing.validated_at,
+            notes: appendCleansingNote(data.notes, cleansing.summary),
+          }
+        }
+      } catch (err) {
+        console.error('Email cleansing failed:', err)
+      }
+    }
+
+    const scored = { ...enriched, ...scoreLead({ ...enriched, status } as Lead) }
     const record = await createLead(scored, ownerId)
     setLeads((prev) => {
       const next = [...prev, record]

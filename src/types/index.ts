@@ -61,6 +61,9 @@ export interface Lead extends OwnedRecord {
   rank_tier?: LeadRankTier
   signal?: string
   pain_theme?: string
+  email_status?: string | null
+  email_valid?: boolean | null
+  email_validated_at?: string | null
   company_id: string | null
   contact_id: string | null
   created_at: string
