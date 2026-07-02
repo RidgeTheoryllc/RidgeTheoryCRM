@@ -44,5 +44,18 @@ export const isSupabaseConfigured = Boolean(
 )
 
 export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl as string, supabaseAnonKey as string)
+  ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
+      auth: {
+        detectSessionInUrl: true,
+      },
+    })
   : null
+
+/** Origin used for Supabase email links (signup confirm, password reset). */
+export function getAuthRedirectUrl(path = '/dashboard') {
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${path}`
+  }
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
+  return siteUrl ? `${siteUrl}${path}` : undefined
+}

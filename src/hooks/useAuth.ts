@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { isSupabaseConfigured, supabase } from '@/lib/supabase'
+import { isSupabaseConfigured, supabase, getAuthRedirectUrl } from '@/lib/supabase'
 import type { AppRole, Profile } from '@/types'
 
 const DEMO_PROFILE: Profile = {
@@ -127,6 +127,7 @@ export function useAuth() {
       email,
       password,
       options: {
+        emailRedirectTo: getAuthRedirectUrl('/dashboard'),
         data: {
           full_name: fullName,
         },
