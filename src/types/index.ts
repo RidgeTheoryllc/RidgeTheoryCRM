@@ -37,6 +37,7 @@ export type ContactStatus = 'Lead' | 'Prospect' | 'Customer' | 'Churned'
 export type LeadSource = 'Website' | 'LinkedIn' | 'Referral' | 'Cold Outreach' | 'Event' | 'Other'
 export type LeadIngestionSource = 'auto' | 'manual'
 export type LeadRankTier = 'high' | 'low'
+export type LeadSegment = 'raw' | 'warm'
 export type LeadStatus =
   | 'Generated' | 'Augmented' | 'Cleaned' | 'Entered'
   | 'Prospecting' | 'Qualified' | 'Disqualified'
@@ -52,6 +53,8 @@ export interface Lead extends OwnedRecord {
   source: LeadSource
   ingestion_source: LeadIngestionSource
   status: LeadStatus
+  segment?: LeadSegment
+  responded_at?: string | null
   notes: string
   tags: string[]
   interest_score?: number

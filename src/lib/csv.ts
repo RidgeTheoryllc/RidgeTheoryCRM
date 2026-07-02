@@ -40,6 +40,12 @@ export function parseCSV(text: string): string[][] {
   return rows.filter((row) => row.some((cell) => cell !== ''))
 }
 
+const FIELD_HEADER_ALIASES: Record<string, string[]> = {
+  phone: ['phone', 'phonenumber', 'mobile', 'cell', 'cellphone', 'workphone', 'directphone', 'telephone', 'contactphone'],
+  company_name: ['company', 'companyname', 'organization', 'org'],
+  email: ['email', 'emailaddress', 'workemail'],
+}
+
 export function createCSVMapping(
   fields: string[],
   headers: string[],
@@ -48,10 +54,13 @@ export function createCSVMapping(
 
   fields.forEach((field) => {
     const fieldKey = normalizeHeader(field)
+    const aliases = FIELD_HEADER_ALIASES[field] ?? [fieldKey]
     const idx = headers.findIndex((header) => {
       const headerKey = normalizeHeader(header)
       if (!headerKey) return false
-      return headerKey === fieldKey || headerKey.includes(fieldKey) || fieldKey.includes(headerKey)
+      return aliases.some((alias) =>
+        headerKey === alias || headerKey.includes(alias) || alias.includes(headerKey),
+      )
     })
 
     if (idx >= 0) auto[field] = idx

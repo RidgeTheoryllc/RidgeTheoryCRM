@@ -60,6 +60,21 @@ export function buildCleansingSummary(result: Pick<EmailCleansingResult, 'status
   return `Reoon: ${result.status}${flagText} - ${deliverable}`
 }
 
+const CLEANSING_NOTE_PATTERN = /^reoon:/i
+
+export function isCleansingNoteLine(line: string): boolean {
+  return CLEANSING_NOTE_PATTERN.test(line.trim())
+}
+
+export function stripCleansingNotes(notes: string): string {
+  return notes
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !isCleansingNoteLine(line))
+    .join('\n')
+    .trim()
+}
+
 export function appendCleansingNote(notes: string, summary: string): string {
   const trimmed = notes.trim()
   if (!trimmed) return summary

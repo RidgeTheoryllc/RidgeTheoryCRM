@@ -1,4 +1,5 @@
 import type { Lead, LeadRankTier } from '@/types'
+import { stripCleansingNotes } from '@/lib/emailCleansing'
 
 export interface LeadScore {
   interest_score: number
@@ -20,7 +21,7 @@ const INTEREST_TERMS = [
 ]
 
 export function scoreLead(lead: Lead): LeadScore {
-  const text = `${lead.title} ${lead.notes} ${lead.tags.join(' ')} ${lead.source}`.toLowerCase()
+  const text = `${lead.title} ${stripCleansingNotes(lead.notes ?? '')} ${lead.tags.join(' ')} ${lead.source}`.toLowerCase()
   const decision_maker_score = clamp(
     25 +
     (SENIORITY_TERMS.some((term) => text.includes(term)) ? 45 : 0) +

@@ -8,7 +8,7 @@ import {
   createProspectingSequence, createSequenceTask,
   deleteCompanyRecord, deleteContactRecord, deleteDealRecord, deleteTaskRecord,
   deleteLeadRecord,
-  fetchCRMData, loadLocalCRMData, saveKey,
+  fetchCRMData, loadLocalCRMData, loadKey, saveKey,
   updateSequenceTaskRecord,
   updateCompanyRecord, updateContactRecord, updateDealRecord, updateTaskRecord,
   updateLeadRecord,
@@ -21,8 +21,12 @@ import type {
 import { STAGE_PROBABILITY } from '@/types'
 import { scoreLead } from '@/lib/leadScoring'
 import { advanceLeadStatus, resolveNewLeadStatus } from '@/lib/leadStatus'
-import { appendCleansingNote, statusAfterEmailCleansing, verifyLeadEmail } from '@/lib/emailCleansing'
+import { statusAfterEmailCleansing, verifyLeadEmail } from '@/lib/emailCleansing'
 import { buildSequenceTask, getSequenceTemplate } from '@/lib/prospecting'
+import {
+  companyFromLead, contactFromLead, findCompanyForLead, findContactForLead,
+  findSiblingLeadContactId,
+} from '@/lib/leadPromotion'
 
 function isTerminalTaskStatus(status: SequenceTaskStatus) {
   return status === 'sent' || status === 'done' || status === 'skipped'
@@ -175,7 +179,11 @@ export function useCRM(profile?: Profile | null) {
   // ── Leads ──────────────────────────────────────────────────
   const addLead = useCallback(async (data: Omit<Lead, 'id' | 'created_at'>) => {
     let status = resolveNewLeadStatus(data.status, data.ingestion_source)
-    let enriched: Omit<Lead, 'id' | 'created_at'> = { ...data, status }
+    let enriched: Omit<Lead, 'id' | 'created_at'> = {
+      ...data,
+      status,
+      segment: data.segment ?? 'raw',
+    }
 
     const email = data.email?.trim()
     if (email) {
@@ -189,7 +197,6 @@ export function useCRM(profile?: Profile | null) {
             email_status: cleansing.status,
             email_valid: cleansing.valid,
             email_validated_at: cleansing.validated_at,
-            notes: appendCleansingNote(data.notes, cleansing.summary),
           }
         }
       } catch (err) {
@@ -222,6 +229,23 @@ export function useCRM(profile?: Profile | null) {
     const score = scoreLead(lead)
     await updateLead(id, score)
     return score
+  }, [leads, updateLead])
+
+  const reverifyLeadEmail = useCallback(async (id: string) => {
+    const lead = leads.find((l) => l.id === id)
+    if (!lead?.email?.trim()) return null
+
+    const cleansing = await verifyLeadEmail(lead.email.trim())
+    if (!cleansing) return null
+
+    const status = statusAfterEmailCleansing(lead.status, cleansing.valid)
+    await updateLead(id, {
+      status,
+      email_status: cleansing.status,
+      email_valid: cleansing.valid,
+      email_validated_at: cleansing.validated_at,
+    })
+    return cleansing
   }, [leads, updateLead])
 
   const enrollLeadInSequence = useCallback(async (id: string) => {
@@ -322,6 +346,66 @@ export function useCRM(profile?: Profile | null) {
       return next
     })
   }, [])
+
+  const promoteLeadToWarm = useCallback(async (id: string) => {
+    const lead = leads.find((l) => l.id === id)
+    if (!lead) return null
+
+    if (lead.segment === 'warm' && lead.contact_id) {
+      return {
+        segment: 'warm' as const,
+        responded_at: lead.responded_at ?? new Date().toISOString(),
+        contact_id: lead.contact_id,
+      }
+    }
+
+    const freshContacts = loadKey<Contact[]>('crm:contacts', contacts)
+    const freshCompanies = loadKey<Company[]>('crm:companies', companies)
+    const respondedAt = new Date().toISOString()
+    let companyId = lead.company_id
+
+    if (!companyId && lead.company_name?.trim()) {
+      const existingCompany = findCompanyForLead(lead, freshCompanies)
+      if (existingCompany) {
+        companyId = existingCompany.id
+      } else {
+        const company = await addCompany(companyFromLead(lead))
+        companyId = company.id
+      }
+    }
+
+    const siblingContactId = findSiblingLeadContactId(lead, leads)
+    let contactId = lead.contact_id ?? siblingContactId
+    const existingContact = contactId
+      ? freshContacts.find((contact) => contact.id === contactId)
+      : findContactForLead(lead, freshContacts, freshCompanies)
+
+    if (existingContact) {
+      contactId = existingContact.id
+      await updateContact(existingContact.id, {
+        phone: lead.phone || existingContact.phone,
+        title: lead.title || existingContact.title,
+        company_id: companyId ?? existingContact.company_id,
+        status: existingContact.status === 'Lead' ? 'Prospect' : existingContact.status,
+      })
+    } else {
+      const contact = await addContact(contactFromLead(lead, companyId))
+      contactId = contact.id
+    }
+
+    await updateLead(id, {
+      segment: 'warm',
+      responded_at: respondedAt,
+      company_id: companyId,
+      contact_id: contactId,
+    })
+
+    return {
+      segment: 'warm' as const,
+      responded_at: respondedAt,
+      contact_id: contactId,
+    }
+  }, [leads, companies, contacts, addCompany, addContact, updateContact, updateLead])
 
   // ── Deals ──────────────────────────────────────────────────
   const addDeal = useCallback(async (data: Omit<Deal, 'id' | 'created_at'>) => {
@@ -454,7 +538,7 @@ export function useCRM(profile?: Profile | null) {
     prospectingSequences, sequenceTasks,
     ready, error,
     addCompany, updateCompany, deleteCompany,
-    addLead, updateLead, deleteLead, rescoreLead, enrollLeadInSequence,
+    addLead, updateLead, deleteLead, rescoreLead, promoteLeadToWarm, reverifyLeadEmail, enrollLeadInSequence,
     addContact, updateContact, deleteContact,
     addDeal, updateDeal, moveDealStage, deleteDeal,
     addActivity,

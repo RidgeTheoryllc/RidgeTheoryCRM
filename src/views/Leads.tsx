@@ -6,13 +6,15 @@ import type { CRMStore } from '@/hooks/useCRM'
 import { useImportExport } from '@/hooks/useImportExport'
 import { createCSVMapping, parseCSV } from '@/lib/csv'
 import { scoreLead } from '@/lib/leadScoring'
-import type { LeadStatus } from '@/types'
+import type { LeadStatus, LeadSegment } from '@/types'
 import { LEAD_BUCKETS, countLeadsByBucket, matchesLeadBucket, type LeadBucket } from '@/lib/leadStatus'
 import { cn, formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/atoms'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { LeadProfileSheet } from '@/components/leads/LeadProfileSheet'
+import { LinkedInButton } from '@/components/ui/LinkedInButton'
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Pagination,
@@ -63,9 +65,17 @@ const LEAD_IMPORT_FIELDS = [
   'website', 'source', 'ingestion_source', 'status', 'notes',
 ]
 
+const SEGMENT_FILTERS: { id: 'all' | LeadSegment; label: string }[] = [
+  { id: 'all', label: 'All segments' },
+  { id: 'raw', label: 'Raw' },
+  { id: 'warm', label: 'Warm' },
+]
+
 export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => void }) {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState<LeadBucket>('all')
+  const [segmentFilter, setSegmentFilter] = useState<'all' | LeadSegment>('all')
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [enrolling, setEnrolling] = useState<string | null>(null)
   const [bulkEnrolling, setBulkEnrolling] = useState(false)
@@ -145,12 +155,14 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
   const filtered = crm.leads
     .filter((lead) => {
       const matchesFilter = matchesLeadBucket(lead.status, filter)
+      const matchesSegment = segmentFilter === 'all' || (lead.segment ?? 'raw') === segmentFilter
       const query = q.toLowerCase()
       const matchesQuery = !q ||
         lead.name.toLowerCase().includes(query) ||
         lead.company_name.toLowerCase().includes(query) ||
-        lead.email.toLowerCase().includes(query)
-      return matchesFilter && matchesQuery
+        lead.email.toLowerCase().includes(query) ||
+        lead.phone.toLowerCase().includes(query)
+      return matchesFilter && matchesSegment && matchesQuery
     })
     .sort((a, b) => effectiveScore(b).overall_score - effectiveScore(a).overall_score)
 
@@ -163,7 +175,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
 
   useEffect(() => {
     setPage(1)
-  }, [q, filter])
+  }, [q, filter, segmentFilter])
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount)
@@ -348,6 +360,24 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
         ))}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {SEGMENT_FILTERS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setSegmentFilter(item.id)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition',
+              segmentFilter === item.id
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-accent',
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       <Card className="overflow-hidden">
         {filtered.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
@@ -380,8 +410,8 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
           </div>
         )}
         {filtered.length > 0 ? (
-          <div className="max-h-[min(26rem,52vh)] overflow-x-hidden overflow-y-auto">
-            <table className="w-full table-fixed caption-bottom text-sm">
+          <div className="max-h-[min(26rem,52vh)] overflow-auto">
+            <table className="w-full min-w-[68rem] caption-bottom text-sm">
               <TableHeader className="sticky top-0 z-10 bg-card [&_th]:bg-card [&_th]:shadow-[inset_0_-1px_0_hsl(var(--border))]">
                 <TableRow>
                   <TableHead className="w-10 px-2">
@@ -393,13 +423,14 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                       aria-label="Select all leads in view"
                     />
                   </TableHead>
-                  <TableHead className="w-[24%]">Lead</TableHead>
-                  <TableHead className="w-[16%]">Company</TableHead>
-                  <TableHead className="w-[10%]">Rank</TableHead>
-                  <TableHead className="w-[10%]">Status</TableHead>
-                  <TableHead className="w-[12%]">Source</TableHead>
-                  <TableHead className="w-[10%]">Created</TableHead>
-                  <TableHead className="w-[14%]">Actions</TableHead>
+                  <TableHead className="w-[20%]">Lead</TableHead>
+                  <TableHead className="w-[10%]">Phone</TableHead>
+                  <TableHead className="w-[12%]">Company</TableHead>
+                  <TableHead className="w-[8%]">Rank</TableHead>
+                  <TableHead className="w-[9%]">Status</TableHead>
+                  <TableHead className="w-[9%]">Source</TableHead>
+                  <TableHead className="w-[8%]">Created</TableHead>
+                  <TableHead className="min-w-[11.5rem]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -409,8 +440,12 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                   const companyName = lead.company_name || '-'
                   const companyWebsite = lead.website || ''
                   return (
-                    <TableRow key={lead.id}>
-                      <TableCell>
+                    <TableRow
+                      key={lead.id}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => setSelectedLeadId(lead.id)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selectedIds.has(lead.id)}
@@ -437,6 +472,24 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                             {emailValidityBadge(lead)}
                           </div>
                         ) : null}
+                        <div className="mt-1">
+                          <Badge className={(lead.segment ?? 'raw') === 'warm' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}>
+                            {(lead.segment ?? 'raw') === 'warm' ? 'Warm' : 'Raw'}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-0" onClick={(e) => e.stopPropagation()}>
+                        {lead.phone?.trim() ? (
+                          <a
+                            href={`tel:${lead.phone.replace(/\s/g, '')}`}
+                            className="truncate text-sm text-primary hover:underline"
+                            title={lead.phone}
+                          >
+                            {lead.phone}
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="max-w-0">
                         <div className="truncate" title={companyName !== '-' ? companyName : undefined}>
@@ -470,16 +523,20 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                       <TableCell className="max-w-0 truncate text-muted-foreground">
                         {formatDate(lead.created_at)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell
+                        className="min-w-[11.5rem] whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <div className="flex items-center gap-1">
+                          <LinkedInButton lead={lead} className="shrink-0" />
                           {activeSequence ? (
-                            <Badge className="bg-blue-100 text-blue-700">Enrolled</Badge>
+                            <Badge className="shrink-0 bg-blue-100 text-blue-700">Enrolled</Badge>
                           ) : (
                             <Button
                               onClick={() => enrollLead(lead.id)}
                               variant="outline"
                               size="sm"
-                              className="h-7 px-2 text-xs"
+                              className="h-7 shrink-0 px-2 text-xs"
                               disabled={bulkBusy || enrolling === lead.id}
                             >
                               {enrolling === lead.id ? '…' : 'Enroll'}
@@ -553,6 +610,12 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
           onConfirm={confirmDelete}
         />
       )}
+
+      <LeadProfileSheet
+        crm={crm}
+        leadId={selectedLeadId}
+        onClose={() => setSelectedLeadId(null)}
+      />
     </div>
   )
 }

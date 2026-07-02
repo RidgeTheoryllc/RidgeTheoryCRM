@@ -9,6 +9,7 @@ import { PriorityBadge } from '@/components/ui/badges'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { STAGES } from '@/types'
+import { TodayOutreachList } from '@/components/outreach/TodayOutreachList'
 
 interface DashboardProps {
   crm: CRMStore
@@ -77,6 +78,8 @@ export function Dashboard({ crm, onNav, onNew }: DashboardProps) {
           )}
         </div>
       </div>
+
+      <TodayOutreachList crm={crm} onNav={onNav} />
 
       {/* KPI row */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

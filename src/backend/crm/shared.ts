@@ -82,6 +82,8 @@ export function normalizeLead(row: Lead): Lead {
     email_status: row.email_status ?? null,
     email_valid: row.email_valid ?? null,
     email_validated_at: row.email_validated_at ?? null,
+    segment: row.segment ?? 'raw',
+    responded_at: row.responded_at ?? null,
     company_id: row.company_id ?? null,
     contact_id: row.contact_id ?? null,
     created_at: row.created_at ?? new Date().toISOString(),

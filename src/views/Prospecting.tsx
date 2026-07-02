@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Mail, Phone, Linkedin, Sparkles, Send, CheckCircle2,
   ChevronDown, ChevronUp, Loader2, CalendarClock,
@@ -9,8 +9,20 @@ import type { CRMStore } from '@/hooks/useCRM'
 import type { Lead, SequenceTask } from '@/types'
 import { format } from 'date-fns'
 import { cn, formatDate } from '@/lib/utils'
+import {
+  getTodaysOutreachTasks,
+  getUpcomingTasks,
+  groupTasksByChannel,
+  todayDateString,
+} from '@/lib/dailyQueue'
+import {
+  isEmailReady,
+  requestProspectingDraft,
+  requestSendEmail,
+} from '@/lib/outreachApi'
 import { Badge } from '@/components/ui/atoms'
 import { Button } from '@/components/ui/button'
+import { LinkedInButton } from '@/components/ui/LinkedInButton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -56,34 +68,22 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   const [message, setMessage] = useState<string | null>(null)
   const [emailPage, setEmailPage] = useState(1)
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const today = useMemo(() => todayDateString(), [])
 
-  const activeTasks = useMemo(() => {
-    return crm.sequenceTasks
-      .filter((task) => task.status === 'pending' && task.due_date <= today)
-      .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.day_number - b.day_number)
-  }, [crm.sequenceTasks, today])
+  const activeTasks = useMemo(
+    () => getTodaysOutreachTasks(crm.sequenceTasks, today),
+    [crm.sequenceTasks, today],
+  )
 
-  const emailTasks = useMemo(
-    () => activeTasks.filter((task) => task.channel === 'email'),
+  const { email: emailTasks, linkedin: linkedinTasks, phone: phoneTasks } = useMemo(
+    () => groupTasksByChannel(activeTasks),
     [activeTasks],
   )
 
-  const linkedinTasks = useMemo(
-    () => activeTasks.filter((task) => task.channel === 'linkedin'),
-    [activeTasks],
+  const upcoming = useMemo(
+    () => getUpcomingTasks(crm.sequenceTasks, today),
+    [crm.sequenceTasks, today],
   )
-
-  const phoneTasks = useMemo(
-    () => activeTasks.filter((task) => task.channel === 'phone'),
-    [activeTasks],
-  )
-
-  const upcoming = useMemo(() => {
-    return crm.sequenceTasks
-      .filter((task) => task.status === 'pending' && task.due_date > today)
-      .sort((a, b) => a.due_date.localeCompare(b.due_date))
-  }, [crm.sequenceTasks, today])
 
   const emailPageCount = Math.max(1, Math.ceil(emailTasks.length / EMAIL_PAGE_SIZE))
 
@@ -95,10 +95,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   useEffect(() => {
     if (emailPage > emailPageCount) setEmailPage(emailPageCount)
   }, [emailPage, emailPageCount])
-
-  const expandedTask = expandedTaskId
-    ? crm.sequenceTasks.find((task) => task.id === expandedTaskId) ?? null
-    : null
 
   function getLead(task: SequenceTask): Lead | undefined {
     return crm.leads.find((item) => item.id === task.lead_id)
@@ -136,7 +132,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     setGeneratingTaskId(task.id)
     setMessage(null)
     try {
-      const data = await requestDraft(lead, task)
+      const data = await requestProspectingDraft(lead, task)
       await crm.updateSequenceTask(task.id, {
         generated_subject: data.subject ?? '',
         generated_body: data.body ?? '',
@@ -160,7 +156,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     setBusyTask(task.id)
     setMessage(null)
     try {
-      const data = await requestSend(lead.email, task.generated_subject, task.generated_body)
+      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body)
       await crm.updateSequenceTask(task.id, {
         status: 'sent',
         resend_email_id: data.id ?? '',
@@ -194,7 +190,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
         if (!lead) continue
         setGeneratingTaskId(task.id)
         setMessage(`Generating drafts… ${done + 1} of ${targets.length}`)
-        const data = await requestDraft(lead, task)
+        const data = await requestProspectingDraft(lead, task)
         await crm.updateSequenceTask(task.id, {
           generated_subject: data.subject ?? '',
           generated_body: data.body ?? '',
@@ -230,7 +226,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
         if (!lead?.email) continue
         setMessage(`Sending emails… ${sent + failed + 1} of ${targets.length}`)
         try {
-          const data = await requestSend(lead.email, task.generated_subject, task.generated_body)
+          const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body)
           await crm.updateSequenceTask(task.id, {
             status: 'sent',
             resend_email_id: data.id ?? '',
@@ -373,55 +369,70 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
                           const ready = isEmailReady(task)
                           const expanded = expandedTaskId === task.id
                           return (
-                            <TableRow
-                              key={task.id}
-                              className={cn(expanded && 'bg-muted/30')}
-                            >
-                              <TableCell>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedEmailIds.has(task.id)}
-                                  onChange={() => toggleEmailSelection(task.id)}
-                                  aria-label={`Select ${lead?.name ?? 'lead'}`}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {lead?.company_name || 'No company'} · Day {task.day_number}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm">{task.title}</TableCell>
-                              <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
-                                {task.generated_subject || 'No draft yet'}
-                              </TableCell>
-                              <TableCell>
-                                <Badge className={ready ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
-                                  {ready ? 'Ready' : 'Draft'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-1">
-                                  <Button
-                                    onClick={() => setExpandedTaskId(expanded ? null : task.id)}
-                                    variant="ghost"
-                                    size="icon"
-                                    title={expanded ? 'Collapse' : 'Preview'}
-                                  >
-                                    {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                  </Button>
-                                  <Button
-                                    onClick={() => sendEmail(task)}
-                                    variant="ghost"
-                                    size="icon"
-                                    disabled={busyTask === task.id || bulkBusy || !ready}
-                                    title="Send email"
-                                  >
-                                    <Send className="h-3.5 w-3.5" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
+                            <Fragment key={task.id}>
+                              <TableRow className={cn(expanded && 'border-b-0 bg-muted/30')}>
+                                <TableCell>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedEmailIds.has(task.id)}
+                                    onChange={() => toggleEmailSelection(task.id)}
+                                    aria-label={`Select ${lead?.name ?? 'lead'}`}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {lead?.company_name || 'No company'} · Day {task.day_number}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm">{task.title}</TableCell>
+                                <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
+                                  {task.generated_subject || 'No draft yet'}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={ready ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
+                                    {ready ? 'Ready' : 'Draft'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-1">
+                                    <Button
+                                      onClick={() => setExpandedTaskId(expanded ? null : task.id)}
+                                      variant="ghost"
+                                      size="icon"
+                                      title={expanded ? 'Collapse' : 'Preview'}
+                                    >
+                                      {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                    </Button>
+                                    <Button
+                                      onClick={() => sendEmail(task)}
+                                      variant="ghost"
+                                      size="icon"
+                                      disabled={busyTask === task.id || bulkBusy || !ready}
+                                      title="Send email"
+                                    >
+                                      <Send className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                              {expanded && (
+                                <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                  <TableCell colSpan={6} className="p-0">
+                                    <div className="prospecting-expand border-t bg-muted/20 px-4 py-4">
+                                      <EmailPreviewPanel
+                                        task={task}
+                                        lead={lead}
+                                        busy={busyTask === task.id || bulkBusy}
+                                        generating={generatingTaskId === task.id}
+                                        onGenerate={() => generateDraft(task)}
+                                        onSend={() => sendEmail(task)}
+                                      />
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </Fragment>
                           )
                         })}
                       </TableBody>
@@ -466,16 +477,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
                     </div>
                   )}
 
-                  {expandedTask && expandedTask.channel === 'email' && (
-                    <EmailPreviewPanel
-                      task={expandedTask}
-                      lead={getLead(expandedTask)}
-                      busy={busyTask === expandedTask.id || bulkBusy}
-                      generating={generatingTaskId === expandedTask.id}
-                      onGenerate={() => generateDraft(expandedTask)}
-                      onSend={() => sendEmail(expandedTask)}
-                    />
-                  )}
                 </>
               )}
             </CardContent>
@@ -579,7 +580,7 @@ function UpcomingSchedule({
                   <TableHead>Lead</TableHead>
                   <TableHead>Sequence step</TableHead>
                   <TableHead>Channel</TableHead>
-                  <TableHead className="w-28">Action</TableHead>
+                  <TableHead className="min-w-[6.75rem]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -605,12 +606,15 @@ function UpcomingSchedule({
                           {CHANNEL_LABEL[task.channel]}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Badge className={
-                          task.trigger_type === 'automatic'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }>
+                      <TableCell className="whitespace-nowrap">
+                        <Badge
+                          className={cn(
+                            'whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium',
+                            task.trigger_type === 'automatic'
+                              ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200/80'
+                              : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200/80',
+                          )}
+                        >
                           {task.trigger_type === 'automatic' ? 'Auto-send' : 'Manual'}
                         </Badge>
                       </TableCell>
@@ -670,7 +674,7 @@ function EmailPreviewPanel({
   const ready = Boolean(lead?.email && task.generated_subject && task.generated_body)
 
   return (
-    <div className="mt-4 rounded-xl border bg-muted/20 p-4">
+    <div>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="font-medium">{lead?.name ?? 'Unknown lead'}</div>
@@ -755,52 +759,17 @@ function ManualTaskRow({
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">No script generated yet.</p>
           )}
-          <Button onClick={onGenerate} variant="outline" size="sm" className="mt-2" disabled={busy}>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {task.channel === 'linkedin' && lead && <LinkedInButton lead={lead} />}
+            <Button onClick={onGenerate} variant="outline" size="sm" disabled={busy}>
             {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {generating
               ? (task.generated_script ? 'Regenerating…' : 'Generating…')
               : (task.generated_script ? 'Regenerate' : 'Generate')}
-          </Button>
+            </Button>
+          </div>
         </div>
       )}
     </div>
   )
-}
-
-async function requestDraft(lead: Lead, task: SequenceTask) {
-  const response = await fetch('/api/ai/prospecting-draft', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      leadName: lead.name,
-      title: lead.title,
-      company: lead.company_name,
-      website: lead.website,
-      source: lead.source,
-      signal: lead.signal || lead.notes,
-      painTheme: lead.pain_theme,
-      rankTier: lead.rank_tier,
-      channel: task.channel,
-      dayNumber: task.day_number,
-      stepTitle: task.title,
-      purpose: task.purpose,
-    }),
-  })
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error || 'Draft generation failed')
-  return data as { subject?: string; body?: string; script?: string }
-}
-
-async function requestSend(to: string, subject: string, text: string) {
-  const response = await fetch('/api/email/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, text }),
-  })
-  const data = await response.json()
-  if (!response.ok) {
-    const err = typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
-    throw new Error(err || 'Email send failed')
-  }
-  return data as { id?: string }
 }

@@ -2,7 +2,7 @@ import type {
   Lead, SequenceChannel, SequenceTask, SequenceTier, SequenceTriggerType,
 } from '@/types'
 import {
-  buildEmailPs, buildEmailSignoff, firstName,
+  buildEmailPs, buildEmailSignoff, firstName, resolveOutreachSignal,
 } from '@/lib/outreach'
 
 export interface SequenceStepTemplate {
@@ -69,7 +69,7 @@ export function createFallbackDraft(lead: Lead, step: SequenceStepTemplate) {
   const theme = lead.pain_theme || 'operations'
   const signoff = buildEmailSignoff()
   const ps = buildEmailPs(lead.website)
-  const signal = lead.signal || lead.notes || inferSignal(lead, theme)
+  const signal = resolveOutreachSignal(lead)
 
   if (step.channel === 'email') {
     return buildFallbackEmail(lead, step, { name, company, theme, signoff, ps, signal })
@@ -79,14 +79,14 @@ export function createFallbackDraft(lead: Lead, step: SequenceStepTemplate) {
     return {
       subject: '',
       body: '',
-      script: `Hi ${name}, this is RidgeTheory — I sent a note about ${signal}. Calling to see if a quick chat on ${theme} at ${company} makes sense. I'll follow up by email if I miss you.`,
+      script: `Hi ${name}, this is RidgeTheory. I sent a note about ${signal}. Calling to see if a quick chat on ${theme} at ${company} makes sense. I'll follow up by email if I miss you.`,
     }
   }
 
   return {
     subject: '',
     body: '',
-    script: `Hi ${name} — saw ${signal} and thought it might be worth connecting. Happy to compare notes on ${theme} if you're open to it.`,
+    script: `Hi ${name}, saw ${signal} and thought it might be worth connecting. Happy to compare notes on ${theme} if you're open to it.`,
   }
 }
 
@@ -105,36 +105,39 @@ function buildFallbackEmail(
   const { name, company, theme, signoff, ps, signal } = ctx
   const titleHook = lead.title ? ` as ${lead.title}` : ''
   const variant = leadVariantIndex(lead, step.day_number)
+  const greeting = variant % 2 === 0 ? 'Hi' : 'Hey'
 
   const openers = [
     `I noticed ${company} seems to be in a growth stretch${titleHook}, and I'm guessing you're probably pulling data from a few different places just to keep tabs on things.`,
-    `Been looking at ${company}${titleHook} — looks like you're scaling, and I imagine reporting across teams is getting harder than it should be.`,
-    `${signal} — that stood out when I was reading up on ${company}. Figured it might mean you're dealing with some messy ops/data stuff behind the scenes.`,
+    `Been looking at ${company}${titleHook}. Looks like you're scaling, and I imagine reporting across teams is getting harder than it should be.`,
+    lead.signal?.trim()
+      ? `${lead.signal.trim()}. That stood out when I was reading up on ${company}. Figured it might mean you're dealing with some messy ops/data stuff behind the scenes.`
+      : `${company} caught my eye${titleHook}. I'm guessing ${theme} workflows are starting to feel harder than they should as things grow.`,
   ]
 
   const painBlocks: Record<string, string[]> = {
     scalability: [
       `Most teams at this stage hit a wall where spreadsheets and scattered tools make it tough to get a real-time read on what's actually happening. You end up hunting for numbers instead of acting on them.`,
-      `What we hear a lot: growth outpaces the internal tools, and suddenly nobody trusts the same dashboard — or there isn't one.`,
+      `What we hear a lot: growth outpaces the internal tools, and suddenly nobody trusts the same dashboard. Sometimes there isn't one at all.`,
     ],
     operations: [
-      `Usually that means more time reconciling data between systems than actually running the business. The info is there — it's just not in one place.`,
+      `Usually that means more time reconciling data between systems than actually running the business. The info is there. It's just not in one place.`,
       `The pattern we see: ops workflows that worked at 20 people start breaking at 50, and everyone feels it in different ways.`,
     ],
     security: [
-      `Growing teams also tend to outgrow how access and data are managed — not dramatic, just... patchy enough that audits and handoffs get painful.`,
+      `Growing teams also tend to outgrow how access and data are managed. Not dramatic, just patchy enough that audits and handoffs get painful.`,
       `Often it's less about a breach and more about not knowing who has access to what, or where sensitive data lives.`,
     ],
     cost: [
-      `And when tools multiply, so do licenses and manual work — hard to see what's actually worth keeping.`,
+      `And when tools multiply, so do licenses and manual work. Hard to see what's actually worth keeping.`,
       `Finance teams usually feel it first: too many subscriptions, too much duplicate entry, not enough visibility.`,
     ],
   }
 
   const offers = [
-    `We build custom dashboards and internal systems that pull the important stuff into one place — so you can see key metrics without the scavenger hunt.`,
+    `We build custom dashboards and internal systems that pull the important stuff into one place, so you can see key metrics without the scavenger hunt.`,
     `RidgeTheory helps growing companies wire up dashboards and lightweight internal tools so the team isn't living in five tabs and a spreadsheet.`,
-    `We mostly do custom dashboards and ops tooling — one source of truth instead of chasing updates across tools.`,
+    `We mostly do custom dashboards and ops tooling. One source of truth instead of chasing updates across tools.`,
   ]
 
   const ctas = [
@@ -145,7 +148,7 @@ function buildFallbackEmail(
 
   const pains = painBlocks[theme] ?? painBlocks.scalability
   const body = [
-    `Hi ${name},`,
+    `${greeting} ${name},`,
     '',
     openers[variant % openers.length],
     '',
@@ -162,23 +165,24 @@ function buildFallbackEmail(
 
   const subjects = [
     `quick question about ${company}`,
-    `${company} — ops / data`,
+    `${company} ops / data`,
     `thoughts on ${theme} at ${company}?`,
     `re: ${company}`,
   ]
 
   if (step.title.toLowerCase().includes('breakup') || step.title.toLowerCase().includes('close')) {
     return {
-      subject: `closing the loop — ${company}`,
-      body: `Hi ${name},\n\nI'll keep this short — I've reached out a couple times about ${theme} at ${company} and don't want to clutter your inbox.\n\nIf timing's off, no worries at all. If it's still on your radar, happy to chat whenever.\n\n${signoff}`,
+      subject: `closing the loop on ${company}`,
+      body: `${greeting} ${name},\n\nI'll keep this short. I've reached out a couple times about ${theme} at ${company} and don't want to clutter your inbox.\n\nIf timing's off, no worries at all. If it's still on your radar, happy to chat whenever.\n\n${signoff}`,
       script: '',
     }
   }
 
   if (step.title.toLowerCase().includes('value') || step.title.toLowerCase().includes('resource')) {
+    const followGreeting = greeting === 'Hi' ? 'Hey' : 'Hi'
     return {
       subject: `resource for ${company}`,
-      body: `Hi ${name},\n\nFollowing up — put together a short note on how teams like ${company} consolidate ops data without a massive rebuild.\n\nIf useful, I can send it over or walk through it on a quick call.\n\n${signoff}\n\n${ps}`,
+      body: `${followGreeting} ${name},\n\nQuick follow-up. I put together a short note on how teams like ${company} consolidate ops data without a massive rebuild.\n\nIf useful, I can send it over or walk through it on a quick call.\n\n${signoff}\n\n${ps}`,
       script: '',
     }
   }
@@ -188,14 +192,6 @@ function buildFallbackEmail(
     body,
     script: '',
   }
-}
-
-function inferSignal(lead: Lead, theme: string) {
-  if (lead.notes?.trim()) return lead.notes.trim()
-  if (lead.source === 'Website') return `${lead.company_name || 'Your team'} came through the site`
-  if (lead.source === 'Referral') return `a referral mentioned ${lead.company_name || 'your team'}`
-  if (lead.title) return `your role around ${theme}`
-  return `what ${lead.company_name || 'your team'} is likely focused on right now`
 }
 
 function leadVariantIndex(lead: Lead, dayNumber: number) {

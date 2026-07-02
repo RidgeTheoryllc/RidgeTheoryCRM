@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.RESEND_FROM_EMAIL
+  const from = process.env.OUTREACH_FROM_EMAIL || process.env.RESEND_FROM_EMAIL
 
   if (!apiKey || !from) {
     return NextResponse.json(
-      { error: 'RESEND_API_KEY and RESEND_FROM_EMAIL must be configured' },
+      { error: 'RESEND_API_KEY and OUTREACH_FROM_EMAIL (or RESEND_FROM_EMAIL) must be configured' },
       { status: 400 },
     )
   }
