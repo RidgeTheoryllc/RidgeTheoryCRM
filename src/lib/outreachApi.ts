@@ -1,5 +1,5 @@
 import type { Lead, SequenceTask } from '@/types'
-import { resolveOutreachSignal } from '@/lib/outreach'
+import { resolveOutreachCompany, resolveOutreachSignal } from '@/lib/outreach'
 
 export function isEmailReady(task: SequenceTask, lead?: Pick<Lead, 'email'>): boolean {
   return Boolean(lead?.email && task.generated_subject && task.generated_body)
@@ -12,7 +12,7 @@ export async function requestProspectingDraft(lead: Lead, task: SequenceTask) {
     body: JSON.stringify({
       leadName: lead.name,
       title: lead.title,
-      company: lead.company_name,
+      company: resolveOutreachCompany(lead),
       website: lead.website,
       source: lead.source,
       signal: resolveOutreachSignal(lead),

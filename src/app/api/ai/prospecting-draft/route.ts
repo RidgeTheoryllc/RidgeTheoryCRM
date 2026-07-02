@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { buildEmailPs, buildEmailSignoff } from '@/lib/outreach'
+import { buildEmailPs, buildEmailSignoff, sanitizeEmailSubject } from '@/lib/outreach'
 
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY
@@ -54,7 +54,13 @@ Return only valid JSON.`,
     return NextResponse.json({ error: 'OpenAI returned no content' }, { status: 502 })
   }
 
-  return NextResponse.json(JSON.parse(content))
+  const parsed = JSON.parse(content) as { subject?: string; body?: string; script?: string }
+  const dayNumber = Number(body.dayNumber)
+  if (parsed.subject) {
+    parsed.subject = sanitizeEmailSubject(parsed.subject, Number.isFinite(dayNumber) ? dayNumber : undefined)
+  }
+
+  return NextResponse.json(parsed)
 }
 
 function buildPrompt(
@@ -113,6 +119,10 @@ ${signoff}
 ${ps}
 - For LinkedIn: put connection note or comment suggestion in "script" (under 280 chars for connection requests).
 - For phone: put call opener + voicemail in "script".
-- Subject lines: specific and casual, not generic ("Quick question about [Company]" beats "[Company] and scalability").
+- Subject lines: specific and casual. Always include the company name when known.
+- Day 1 / opener emails: NEVER use "Re:" or "re:" (this is the first email, not a reply).
+- Use normal sentence casing (capitalize the first word and proper nouns like company names). Not all-lowercase.
+- Good: "Quick question about Fulton Trucking", "Ops at West Coast Water & Trucking?"
+- Bad: "re: your team", "your team ops / data", generic subjects with no company name.
 - Vary structure: not every email needs the same number of paragraphs. Some can open with a question, others with an observation.`
 }

@@ -2,7 +2,8 @@ import type {
   Lead, SequenceChannel, SequenceTask, SequenceTier, SequenceTriggerType,
 } from '@/types'
 import {
-  buildEmailPs, buildEmailSignoff, firstName, resolveOutreachSignal,
+  buildEmailPs, buildEmailSignoff, resolveOutreachCompany, resolveOutreachGreetingName,
+  resolveOutreachSignal, sanitizeEmailSubject,
 } from '@/lib/outreach'
 
 export interface SequenceStepTemplate {
@@ -64,8 +65,8 @@ export function buildSequenceTask(
 }
 
 export function createFallbackDraft(lead: Lead, step: SequenceStepTemplate) {
-  const name = firstName(lead.name)
-  const company = lead.company_name || 'your team'
+  const name = resolveOutreachGreetingName(lead)
+  const company = resolveOutreachCompany(lead)
   const theme = lead.pain_theme || 'operations'
   const signoff = buildEmailSignoff()
   const ps = buildEmailPs(lead.website)
@@ -163,16 +164,11 @@ function buildFallbackEmail(
     ps,
   ].join('\n')
 
-  const subjects = [
-    `quick question about ${company}`,
-    `${company} ops / data`,
-    `thoughts on ${theme} at ${company}?`,
-    `re: ${company}`,
-  ]
+  const subjects = buildFallbackSubjects(company, theme, step)
 
   if (step.title.toLowerCase().includes('breakup') || step.title.toLowerCase().includes('close')) {
     return {
-      subject: `closing the loop on ${company}`,
+      subject: subjects[0],
       body: `${greeting} ${name},\n\nI'll keep this short. I've reached out a couple times about ${theme} at ${company} and don't want to clutter your inbox.\n\nIf timing's off, no worries at all. If it's still on your radar, happy to chat whenever.\n\n${signoff}`,
       script: '',
     }
@@ -181,7 +177,7 @@ function buildFallbackEmail(
   if (step.title.toLowerCase().includes('value') || step.title.toLowerCase().includes('resource')) {
     const followGreeting = greeting === 'Hi' ? 'Hey' : 'Hi'
     return {
-      subject: `resource for ${company}`,
+      subject: subjects[variant % subjects.length],
       body: `${followGreeting} ${name},\n\nQuick follow-up. I put together a short note on how teams like ${company} consolidate ops data without a massive rebuild.\n\nIf useful, I can send it over or walk through it on a quick call.\n\n${signoff}\n\n${ps}`,
       script: '',
     }
@@ -192,6 +188,42 @@ function buildFallbackEmail(
     body,
     script: '',
   }
+}
+
+function buildFallbackSubjects(company: string, theme: string, step: SequenceStepTemplate): string[] {
+  const stepTitle = step.title.toLowerCase()
+  const themeLabel = theme.charAt(0).toUpperCase() + theme.slice(1)
+
+  if (stepTitle.includes('breakup') || stepTitle.includes('close')) {
+    return [sanitizeEmailSubject(`Closing the loop on ${company}`, step.day_number)]
+  }
+
+  if (stepTitle.includes('value') || stepTitle.includes('resource')) {
+    return [
+      sanitizeEmailSubject(`Resource for ${company}`, step.day_number),
+      sanitizeEmailSubject(`Quick follow-up for ${company}`, step.day_number),
+    ]
+  }
+
+  if (stepTitle.includes('new angle')) {
+    return [
+      sanitizeEmailSubject(`Another angle on ${themeLabel} at ${company}`, step.day_number),
+      sanitizeEmailSubject(`One more thought on ${company}`, step.day_number),
+    ]
+  }
+
+  const openerSubjects = [
+    `Quick question about ${company}`,
+    `Ops / data at ${company}`,
+    `${themeLabel} at ${company}?`,
+    `Thoughts on dashboards at ${company}?`,
+  ]
+
+  if (step.day_number > 1) {
+    openerSubjects.push(`Re: ${company}`)
+  }
+
+  return openerSubjects.map((subject) => sanitizeEmailSubject(subject, step.day_number))
 }
 
 function leadVariantIndex(lead: Lead, dayNumber: number) {
