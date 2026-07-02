@@ -2,11 +2,18 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.OUTREACH_FROM_EMAIL || process.env.RESEND_FROM_EMAIL
+  const outreachFrom = process.env.OUTREACH_FROM_EMAIL?.trim()
+  const resendFrom = process.env.RESEND_FROM_EMAIL?.trim()
+  // OUTREACH_FROM_EMAIL wins when set; ignore placeholder values from .env.example
+  const from = outreachFrom && !outreachFrom.includes('your-outreach-domain')
+    ? outreachFrom
+    : resendFrom
 
   if (!apiKey || !from) {
     return NextResponse.json(
-      { error: 'RESEND_API_KEY and OUTREACH_FROM_EMAIL (or RESEND_FROM_EMAIL) must be configured' },
+      {
+        error: 'Email is not configured on the server. Set RESEND_API_KEY and RESEND_FROM_EMAIL (or OUTREACH_FROM_EMAIL) in your hosting environment variables, then redeploy.',
+      },
       { status: 400 },
     )
   }
@@ -35,7 +42,11 @@ export async function POST(request: Request) {
 
   const data = await response.json()
   if (!response.ok) {
-    return NextResponse.json({ error: data }, { status: response.status })
+    const message =
+      typeof data.message === 'string' ? data.message
+      : typeof data.error === 'string' ? data.error
+      : JSON.stringify(data)
+    return NextResponse.json({ error: message }, { status: response.status })
   }
 
   return NextResponse.json({ id: data.id })
