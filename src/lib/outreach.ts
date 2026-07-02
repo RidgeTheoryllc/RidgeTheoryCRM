@@ -90,7 +90,7 @@ export function sanitizeEmailSubject(subject: string, dayNumber?: number): strin
 
 /** Business context for outreach — never includes email verification or internal CRM notes. */
 export function resolveOutreachSignal(
-  lead: Pick<Lead, 'signal' | 'notes' | 'company_name' | 'source' | 'title' | 'pain_theme'>,
+  lead: Pick<Lead, 'signal' | 'notes' | 'company_name' | 'name' | 'source' | 'title' | 'pain_theme'>,
 ): string {
   if (lead.signal?.trim()) return lead.signal.trim()
 
