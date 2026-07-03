@@ -7,6 +7,11 @@ import {
   LEAD_SOURCES, LEAD_STATUSES, STAGES, STAGE_PROBABILITY,
 } from '@/types'
 
+export interface ImportResult {
+  imported: number
+  skippedInvalidEmail: number
+}
+
 export function useImportExport(crm: CRMStore) {
   const exportCSV = useCallback(
     (type: 'leads' | 'companies' | 'contacts' | 'deals') => {
@@ -42,8 +47,10 @@ export function useImportExport(crm: CRMStore) {
       type: 'leads' | 'companies' | 'contacts' | 'deals',
       rows: string[][],
       mapping: Record<string, number | ''>,
-    ) => {
+      options: { skipInvalidEmails?: boolean } = {},
+    ): Promise<ImportResult> => {
       let imported = 0
+      let skippedInvalidEmail = 0
 
       for (const row of rows) {
         const obj: Record<string, string> = {}
@@ -52,7 +59,7 @@ export function useImportExport(crm: CRMStore) {
         })
         if (!obj.name && !obj.title) continue
         if (type === 'leads') {
-          await crm.addLead({
+          const record = await crm.addLead({
             name: obj.name ?? '',
             title: obj.title ?? '',
             email: obj.email ?? '',
@@ -67,6 +74,13 @@ export function useImportExport(crm: CRMStore) {
             company_id: null,
             contact_id: null,
           })
+
+          // Drop leads Reoon flagged as invalid so outreach focuses on reachable prospects.
+          if (options.skipInvalidEmails && record.email_valid === false) {
+            await crm.deleteLead(record.id)
+            skippedInvalidEmail += 1
+            continue
+          }
         } else if (type === 'contacts') {
           await crm.addContact({
             name: obj.name ?? '',
@@ -103,7 +117,7 @@ export function useImportExport(crm: CRMStore) {
         imported += 1
       }
 
-      return imported
+      return { imported, skippedInvalidEmail }
     },
     [crm],
   )

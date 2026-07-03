@@ -29,11 +29,16 @@ export async function requestProspectingDraft(lead: Lead, task: SequenceTask) {
   return data as { subject?: string; body?: string; script?: string }
 }
 
-export async function requestSendEmail(to: string, subject: string, text: string) {
+export async function requestSendEmail(
+  to: string,
+  subject: string,
+  text: string,
+  leadId?: string,
+) {
   const response = await fetch('/api/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, text }),
+    body: JSON.stringify({ to, subject, text, lead_id: leadId }),
   })
   const data = await response.json()
   if (!response.ok) {

@@ -115,6 +115,11 @@ create table if not exists leads (
   email_status text,
   email_valid boolean,
   email_validated_at timestamptz,
+  last_email_opened_at timestamptz,
+  total_email_opens integer default 0,
+  last_email_clicked_at timestamptz,
+  total_email_clicks integer default 0,
+  email_engagement text default 'none',
   segment text default 'raw',
   responded_at timestamptz,
   company_id uuid references companies(id) on delete set null,
@@ -151,6 +156,13 @@ create table if not exists sequence_tasks (
   resend_email_id text default '',
   sent_at timestamptz,
   completed_at timestamptz,
+  delivered_at timestamptz,
+  opened_at timestamptz,
+  open_count integer default 0,
+  clicked_at timestamptz,
+  click_count integer default 0,
+  bounced_at timestamptz,
+  bounce_reason text,
   created_at timestamptz default now()
 );
 

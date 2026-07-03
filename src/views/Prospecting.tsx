@@ -12,6 +12,7 @@ import { cn, formatDate } from '@/lib/utils'
 import {
   getTodaysOutreachTasks,
   getUpcomingTasks,
+  getRecentlySentEmailTasks,
   groupTasksByChannel,
   todayDateString,
 } from '@/lib/dailyQueue'
@@ -21,6 +22,7 @@ import {
   requestSendEmail,
 } from '@/lib/outreachApi'
 import { Badge } from '@/components/ui/atoms'
+import { EngagementBadge } from '@/components/outreach/EngagementBadge'
 import { Button } from '@/components/ui/button'
 import { LinkedInButton } from '@/components/ui/LinkedInButton'
 import { Card, CardContent } from '@/components/ui/card'
@@ -83,6 +85,11 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   const upcoming = useMemo(
     () => getUpcomingTasks(crm.sequenceTasks, today),
     [crm.sequenceTasks, today],
+  )
+
+  const recentlySentEmails = useMemo(
+    () => getRecentlySentEmailTasks(crm.sequenceTasks),
+    [crm.sequenceTasks],
   )
 
   const emailPageCount = Math.max(1, Math.ceil(emailTasks.length / EMAIL_PAGE_SIZE))
@@ -156,13 +163,16 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     setBusyTask(task.id)
     setMessage(null)
     try {
-      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body)
+      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
       await crm.updateSequenceTask(task.id, {
         status: 'sent',
         resend_email_id: data.id ?? '',
         sent_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
       })
+      if (!lead.email_engagement || lead.email_engagement === 'none') {
+        await crm.updateLead(lead.id, { email_engagement: 'sent' })
+      }
       setSelectedEmailIds((prev) => {
         const next = new Set(prev)
         next.delete(task.id)
@@ -226,13 +236,16 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
         if (!lead?.email) continue
         setMessage(`Sending emails… ${sent + failed + 1} of ${targets.length}`)
         try {
-          const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body)
+          const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
           await crm.updateSequenceTask(task.id, {
             status: 'sent',
             resend_email_id: data.id ?? '',
             sent_at: new Date().toISOString(),
             completed_at: new Date().toISOString(),
           })
+          if (!lead.email_engagement || lead.email_engagement === 'none') {
+            await crm.updateLead(lead.id, { email_engagement: 'sent' })
+          }
           sent += 1
         } catch {
           failed += 1
@@ -276,7 +289,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review sequence tasks, generate copy, and complete today&apos;s outreach.
+          Email 1 goes out first. Opens unlock Email 2; opens on Email 2 unlock LinkedIn, phone, and close — and add the lead to Warm/Contacts.
         </p>
         {message && (
           <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
@@ -478,6 +491,53 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
                   )}
 
                 </>
+              )}
+
+              {recentlySentEmails.length > 0 && (
+                <div className="mt-8">
+                  <h3 className="mb-3 text-sm font-semibold">Sent recently</h3>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Engagement updates live when prospects open or click your emails.
+                  </p>
+                  <div className="overflow-hidden rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Lead</TableHead>
+                          <TableHead>Step</TableHead>
+                          <TableHead>Subject</TableHead>
+                          <TableHead>Sent</TableHead>
+                          <TableHead>Engagement</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {recentlySentEmails.slice(0, 20).map((task) => {
+                          const lead = getLead(task)
+                          return (
+                            <TableRow key={task.id}>
+                              <TableCell>
+                                <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {lead?.company_name || 'No company'} · Day {task.day_number}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm">{task.title}</TableCell>
+                              <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
+                                {task.generated_subject}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {task.sent_at ? formatDate(task.sent_at) : '—'}
+                              </TableCell>
+                              <TableCell>
+                                <EngagementBadge variant="task" task={task} />
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>

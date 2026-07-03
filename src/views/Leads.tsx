@@ -6,6 +6,8 @@ import type { CRMStore } from '@/hooks/useCRM'
 import { useImportExport } from '@/hooks/useImportExport'
 import { createCSVMapping, parseCSV } from '@/lib/csv'
 import { scoreLead } from '@/lib/leadScoring'
+import { compareEngagementForSort, matchesEngagementFilter } from '@/lib/emailEngagement'
+import { EngagementBadge } from '@/components/outreach/EngagementBadge'
 import type { LeadStatus, LeadSegment } from '@/types'
 import { LEAD_BUCKETS, countLeadsByBucket, matchesLeadBucket, type LeadBucket } from '@/lib/leadStatus'
 import { cn, formatDate } from '@/lib/utils'
@@ -71,10 +73,43 @@ const SEGMENT_FILTERS: { id: 'all' | LeadSegment; label: string }[] = [
   { id: 'warm', label: 'Warm' },
 ]
 
+type EmailFilter = 'all' | 'valid' | 'unverified' | 'invalid'
+
+const EMAIL_FILTERS: { id: EmailFilter; label: string }[] = [
+  { id: 'all', label: 'All emails' },
+  { id: 'valid', label: 'Valid only' },
+  { id: 'unverified', label: 'Unverified' },
+  { id: 'invalid', label: 'Invalid' },
+]
+
+function matchesEmailFilter(
+  lead: { email: string; email_valid?: boolean | null },
+  filter: EmailFilter,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'valid') return lead.email_valid === true
+  if (filter === 'invalid') return lead.email_valid === false
+  return lead.email_valid !== true && lead.email_valid !== false
+}
+
+type EngagementFilter = 'all' | 'never_opened' | 'opened' | 'clicked' | 'bounced'
+type LeadSort = 'score' | 'engagement'
+
+const ENGAGEMENT_FILTERS: { id: EngagementFilter; label: string }[] = [
+  { id: 'all', label: 'All engagement' },
+  { id: 'never_opened', label: 'Never opened' },
+  { id: 'opened', label: 'Opened' },
+  { id: 'clicked', label: 'Clicked' },
+  { id: 'bounced', label: 'Bounced' },
+]
+
 export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => void }) {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState<LeadBucket>('all')
   const [segmentFilter, setSegmentFilter] = useState<'all' | LeadSegment>('all')
+  const [emailFilter, setEmailFilter] = useState<EmailFilter>('valid')
+  const [engagementFilter, setEngagementFilter] = useState<EngagementFilter>('all')
+  const [leadSort, setLeadSort] = useState<LeadSort>('score')
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [enrolling, setEnrolling] = useState<string | null>(null)
@@ -103,11 +138,18 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
 
       const [headers, ...rows] = parsed
       const mapping = createCSVMapping(LEAD_IMPORT_FIELDS, headers)
-      const imported = await importCSV('leads', rows, mapping)
+      const { imported, skippedInvalidEmail } = await importCSV('leads', rows, mapping, {
+        skipInvalidEmails: true,
+      })
+      const skippedNote = skippedInvalidEmail > 0
+        ? ` Skipped ${skippedInvalidEmail} with invalid emails.`
+        : ''
       setImportMessage(
         imported > 0
-          ? `Imported and verified ${imported} lead${imported === 1 ? '' : 's'} from ${file.name}.`
-          : 'No leads imported. Check that the CSV has a name or title column.',
+          ? `Imported and verified ${imported} lead${imported === 1 ? '' : 's'} from ${file.name}.${skippedNote}`
+          : skippedInvalidEmail > 0
+            ? `No leads imported. Skipped ${skippedInvalidEmail} with invalid emails.`
+            : 'No leads imported. Check that the CSV has a name or title column.',
       )
     } catch (error) {
       console.error('Failed to import leads CSV:', error)
@@ -156,15 +198,20 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
     .filter((lead) => {
       const matchesFilter = matchesLeadBucket(lead.status, filter)
       const matchesSegment = segmentFilter === 'all' || (lead.segment ?? 'raw') === segmentFilter
+      const matchesEmail = matchesEmailFilter(lead, emailFilter)
+      const matchesEngagement = matchesEngagementFilter(lead, engagementFilter)
       const query = q.toLowerCase()
       const matchesQuery = !q ||
         lead.name.toLowerCase().includes(query) ||
         lead.company_name.toLowerCase().includes(query) ||
         lead.email.toLowerCase().includes(query) ||
         lead.phone.toLowerCase().includes(query)
-      return matchesFilter && matchesSegment && matchesQuery
+      return matchesFilter && matchesSegment && matchesEmail && matchesEngagement && matchesQuery
     })
-    .sort((a, b) => effectiveScore(b).overall_score - effectiveScore(a).overall_score)
+    .sort((a, b) => {
+      if (leadSort === 'engagement') return compareEngagementForSort(a, b)
+      return effectiveScore(b).overall_score - effectiveScore(a).overall_score
+    })
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
 
@@ -175,7 +222,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
 
   useEffect(() => {
     setPage(1)
-  }, [q, filter, segmentFilter])
+  }, [q, filter, segmentFilter, emailFilter, engagementFilter, leadSort])
 
   useEffect(() => {
     if (page > pageCount) setPage(pageCount)
@@ -360,7 +407,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {SEGMENT_FILTERS.map((item) => (
           <button
             key={item.id}
@@ -376,6 +423,51 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
             {item.label}
           </button>
         ))}
+        <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden />
+        {EMAIL_FILTERS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setEmailFilter(item.id)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition',
+              emailFilter === item.id
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-accent',
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden />
+        {ENGAGEMENT_FILTERS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setEngagementFilter(item.id)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition',
+              engagementFilter === item.id
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-accent',
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span className="mx-1 hidden h-4 w-px bg-border sm:block" aria-hidden />
+        <button
+          type="button"
+          onClick={() => setLeadSort(leadSort === 'score' ? 'engagement' : 'score')}
+          className={cn(
+            'rounded-full border px-3 py-1 text-xs font-medium transition',
+            leadSort === 'engagement'
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'text-muted-foreground hover:bg-accent',
+          )}
+        >
+          {leadSort === 'engagement' ? 'Sort: Most engaged' : 'Sort: Score'}
+        </button>
       </div>
 
       <Card className="overflow-hidden">
@@ -427,6 +519,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                   <TableHead className="w-[10%]">Phone</TableHead>
                   <TableHead className="w-[12%]">Company</TableHead>
                   <TableHead className="w-[8%]">Rank</TableHead>
+                  <TableHead className="w-[9%]">Engagement</TableHead>
                   <TableHead className="w-[9%]">Status</TableHead>
                   <TableHead className="w-[9%]">Source</TableHead>
                   <TableHead className="w-[8%]">Created</TableHead>
@@ -508,6 +601,9 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                           </Badge>
                           <span className="text-sm font-medium tabular-nums">{score.overall_score}</span>
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <EngagementBadge variant="lead" lead={lead} />
                       </TableCell>
                       <TableCell>
                         <Badge className={STATUS_STYLE[lead.status]}>{lead.status}</Badge>

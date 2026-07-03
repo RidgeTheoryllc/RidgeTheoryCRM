@@ -5,6 +5,7 @@ import {
   buildEmailPs, buildEmailSignoff, resolveOutreachCompany, resolveOutreachGreetingName,
   resolveOutreachSignal, sanitizeEmailSubject,
 } from '@/lib/outreach'
+import { ENGAGEMENT_GATED_SEQUENCE, type EngagementStepTemplate } from '@/lib/engagementSequence'
 
 export interface SequenceStepTemplate {
   day_number: number
@@ -33,7 +34,24 @@ export const LOW_TOUCH_SEQUENCE: SequenceStepTemplate[] = [
 ]
 
 export function getSequenceTemplate(tier: SequenceTier) {
+  if (tier === 'engagement') return ENGAGEMENT_GATED_SEQUENCE as SequenceStepTemplate[]
   return tier === 'high' ? HIGH_TOUCH_SEQUENCE : LOW_TOUCH_SEQUENCE
+}
+
+export { ENGAGEMENT_GATED_SEQUENCE } from '@/lib/engagementSequence'
+
+export function buildEngagementGatedTask(
+  lead: Lead,
+  sequenceId: string,
+  startDate: string,
+  step: EngagementStepTemplate,
+  stepIndex: number,
+): Omit<SequenceTask, 'id' | 'created_at' | 'owner_id'> {
+  const base = buildSequenceTask(lead, sequenceId, startDate, step)
+  if (stepIndex === 0) {
+    return { ...base, status: 'pending', due_date: startDate }
+  }
+  return { ...base, status: 'locked', due_date: '2099-12-31' }
 }
 
 export function buildSequenceTask(

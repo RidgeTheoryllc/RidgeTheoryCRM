@@ -6,6 +6,8 @@ import type { CRMStore } from '@/hooks/useCRM'
 import type { Lead, LeadStatus, SequenceTask } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { stripCleansingNotes } from '@/lib/emailCleansing'
+import { formatEngagementRelativeTime } from '@/lib/emailEngagement'
+import { EngagementBadge } from '@/components/outreach/EngagementBadge'
 import { Badge } from '@/components/ui/atoms'
 import { Button } from '@/components/ui/button'
 import { LinkedInButton } from '@/components/ui/LinkedInButton'
@@ -113,6 +115,38 @@ export function LeadProfileSheet({ crm, leadId, onClose }: LeadProfileSheetProps
               <LinkedInButton lead={lead} />
             </div>
 
+            {(lead.email_engagement && lead.email_engagement !== 'none') && (
+              <div className="mt-5">
+                <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Email engagement
+                </h3>
+                <div className="mt-2 space-y-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <EngagementBadge variant="lead" lead={lead} />
+                  </div>
+                  <Row label="Total opens" value={String(lead.total_email_opens ?? 0)} />
+                  <Row label="Total clicks" value={String(lead.total_email_clicks ?? 0)} />
+                  {lead.last_email_opened_at && (
+                    <Row
+                      label="Last opened"
+                      value={formatEngagementRelativeTime(lead.last_email_opened_at) ?? formatDate(lead.last_email_opened_at)}
+                    />
+                  )}
+                  {lead.last_email_clicked_at && (
+                    <Row
+                      label="Last clicked"
+                      value={formatEngagementRelativeTime(lead.last_email_clicked_at) ?? formatDate(lead.last_email_clicked_at)}
+                    />
+                  )}
+                  {lead.email_engagement === 'bounced' && (
+                    <p className="text-sm text-destructive">
+                      This email bounced. Do not send further outreach to this address.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {displayNotes && (
               <div className="mt-5">
                 <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Notes</h3>
@@ -183,9 +217,10 @@ function HistoryItem({ task }: { task: SequenceTask }) {
   const when = task.sent_at || task.completed_at
   return (
     <div className="rounded-lg border p-3">
-      <div className="flex items-center gap-2 text-sm font-medium capitalize">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-medium capitalize">
         <Icon className="h-3.5 w-3.5 text-primary" />
         {task.channel} · {task.title}
+        {task.channel === 'email' && <EngagementBadge variant="task" task={task} />}
       </div>
       <div className="mt-1 text-xs text-muted-foreground">
         Day {task.day_number}

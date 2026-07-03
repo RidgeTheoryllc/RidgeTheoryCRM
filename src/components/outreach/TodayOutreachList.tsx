@@ -66,13 +66,16 @@ export function TodayOutreachList({ crm, onNav }: TodayOutreachListProps) {
     setBusyTaskId(task.id)
     setMessage(null)
     try {
-      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body)
+      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
       await crm.updateSequenceTask(task.id, {
         status: 'sent',
         resend_email_id: data.id ?? '',
         sent_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
       })
+      if (!lead.email_engagement || lead.email_engagement === 'none') {
+        await crm.updateLead(lead.id, { email_engagement: 'sent' })
+      }
       setMessage('Email sent.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Email send failed.')

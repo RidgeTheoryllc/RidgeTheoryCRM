@@ -14,6 +14,7 @@ import {
   updateLeadRecord,
 } from '@/backend/crm'
 import type { CRMData } from '@/backend/crm'
+import { normalizeLead, normalizeSequenceTask } from '@/backend/crm/shared'
 import type {
   Company, Contact, Deal, Activity, Lead, Task, DealStage, Profile,
   ProspectingSequence, SequenceTask, SequenceTaskStatus,
@@ -22,7 +23,8 @@ import { STAGE_PROBABILITY } from '@/types'
 import { scoreLead } from '@/lib/leadScoring'
 import { advanceLeadStatus, resolveNewLeadStatus } from '@/lib/leadStatus'
 import { statusAfterEmailCleansing, verifyLeadEmail } from '@/lib/emailCleansing'
-import { buildSequenceTask, getSequenceTemplate } from '@/lib/prospecting'
+import { buildEngagementGatedTask } from '@/lib/prospecting'
+import { ENGAGEMENT_GATED_SEQUENCE } from '@/lib/engagementSequence'
 import {
   companyFromLead, contactFromLead, findCompanyForLead, findContactForLead,
   findSiblingLeadContactId,
@@ -129,6 +131,43 @@ export function useCRM(profile?: Profile | null) {
       cancelled = true
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile])
+
+  useEffect(() => {
+    if (!supabase || !profile) return
+
+    const client = supabase
+    const channel = client
+      .channel('crm-engagement')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'leads' },
+        (payload) => {
+          const updated = normalizeLead(payload.new as Lead)
+          setLeads((prev) => {
+            const next = prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l))
+            saveKey('crm:leads', next)
+            return next
+          })
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sequence_tasks' },
+        (payload) => {
+          const updated = normalizeSequenceTask(payload.new as SequenceTask)
+          setSequenceTasks((prev) => {
+            const next = prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t))
+            saveKey('crm:sequenceTasks', next)
+            return next
+          })
+        },
+      )
+      .subscribe()
+
+    return () => {
+      client.removeChannel(channel)
+    }
   }, [profile])
 
   // ── Companies ──────────────────────────────────────────────
@@ -263,7 +302,7 @@ export function useCRM(profile?: Profile | null) {
     const startDate = new Date().toISOString().slice(0, 10)
     const sequence = await createProspectingSequence({
       lead_id: id,
-      tier: score.rank_tier,
+      tier: 'engagement',
       status: 'active',
       start_date: startDate,
     }, ownerId)
@@ -275,9 +314,10 @@ export function useCRM(profile?: Profile | null) {
     })
 
     const createdTasks: SequenceTask[] = []
-    for (const step of getSequenceTemplate(score.rank_tier)) {
+    for (let i = 0; i < ENGAGEMENT_GATED_SEQUENCE.length; i += 1) {
+      const step = ENGAGEMENT_GATED_SEQUENCE[i]
       const task = await createSequenceTask(
-        buildSequenceTask(scoredLead, sequence.id, startDate, step),
+        buildEngagementGatedTask(scoredLead, sequence.id, startDate, step, i),
         ownerId,
       )
       createdTasks.push(task)

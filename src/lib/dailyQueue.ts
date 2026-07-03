@@ -22,6 +22,22 @@ export function getUpcomingTasks(
     .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.day_number - b.day_number)
 }
 
+export function getRecentlySentEmailTasks(
+  tasks: SequenceTask[],
+  days = 14,
+): SequenceTask[] {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - days)
+
+  return tasks
+    .filter((task) => {
+      if (task.channel !== 'email' || task.status !== 'sent') return false
+      if (!task.sent_at) return true
+      return new Date(task.sent_at) >= cutoff
+    })
+    .sort((a, b) => (b.sent_at ?? '').localeCompare(a.sent_at ?? ''))
+}
+
 export function groupTasksByChannel(tasks: SequenceTask[]) {
   return {
     email: tasks.filter((task) => task.channel === 'email'),

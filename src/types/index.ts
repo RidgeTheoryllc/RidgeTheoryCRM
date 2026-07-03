@@ -38,6 +38,7 @@ export type LeadSource = 'Website' | 'LinkedIn' | 'Referral' | 'Cold Outreach' |
 export type LeadIngestionSource = 'auto' | 'manual'
 export type LeadRankTier = 'high' | 'low'
 export type LeadSegment = 'raw' | 'warm'
+export type EmailEngagement = 'none' | 'sent' | 'delivered' | 'opened' | 'clicked' | 'bounced'
 export type LeadStatus =
   | 'Generated' | 'Augmented' | 'Cleaned' | 'Entered'
   | 'Prospecting' | 'Qualified' | 'Disqualified'
@@ -67,6 +68,11 @@ export interface Lead extends OwnedRecord {
   email_status?: string | null
   email_valid?: boolean | null
   email_validated_at?: string | null
+  email_engagement?: EmailEngagement
+  last_email_opened_at?: string | null
+  total_email_opens?: number
+  last_email_clicked_at?: string | null
+  total_email_clicks?: number
   company_id: string | null
   contact_id: string | null
   created_at: string
@@ -115,11 +121,11 @@ export interface Activity extends OwnedRecord {
 
 export type TaskPriority = 'low' | 'medium' | 'high'
 export type TaskStatus = 'open' | 'done'
-export type SequenceTier = 'high' | 'low'
+export type SequenceTier = 'high' | 'low' | 'engagement'
 export type SequenceStatus = 'active' | 'paused' | 'completed'
 export type SequenceChannel = 'email' | 'linkedin' | 'phone'
 export type SequenceTriggerType = 'automatic' | 'manual'
-export type SequenceTaskStatus = 'pending' | 'sent' | 'done' | 'skipped'
+export type SequenceTaskStatus = 'pending' | 'sent' | 'done' | 'skipped' | 'locked'
 
 export interface ProspectingSequence extends OwnedRecord {
   id: string
@@ -147,6 +153,13 @@ export interface SequenceTask extends OwnedRecord {
   resend_email_id: string
   sent_at: string | null
   completed_at: string | null
+  delivered_at?: string | null
+  opened_at?: string | null
+  open_count?: number
+  clicked_at?: string | null
+  click_count?: number
+  bounced_at?: string | null
+  bounce_reason?: string | null
   created_at: string
 }
 
