@@ -163,7 +163,13 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     setBusyTask(task.id)
     setMessage(null)
     try {
-      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
+      const data = await requestSendEmail(
+        lead.email,
+        task.generated_subject,
+        task.generated_body,
+        lead.id,
+        task.id,
+      )
       await crm.updateSequenceTask(task.id, {
         status: 'sent',
         resend_email_id: data.id ?? '',
@@ -236,7 +242,13 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
         if (!lead?.email) continue
         setMessage(`Sending emails… ${sent + failed + 1} of ${targets.length}`)
         try {
-          const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
+          const data = await requestSendEmail(
+            lead.email,
+            task.generated_subject,
+            task.generated_body,
+            lead.id,
+            task.id,
+          )
           await crm.updateSequenceTask(task.id, {
             status: 'sent',
             resend_email_id: data.id ?? '',

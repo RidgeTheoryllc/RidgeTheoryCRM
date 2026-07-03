@@ -66,7 +66,13 @@ export function TodayOutreachList({ crm, onNav }: TodayOutreachListProps) {
     setBusyTaskId(task.id)
     setMessage(null)
     try {
-      const data = await requestSendEmail(lead.email, task.generated_subject, task.generated_body, lead.id)
+      const data = await requestSendEmail(
+        lead.email,
+        task.generated_subject,
+        task.generated_body,
+        lead.id,
+        task.id,
+      )
       await crm.updateSequenceTask(task.id, {
         status: 'sent',
         resend_email_id: data.id ?? '',

@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { canUpgradeEngagement, type EmailEngagement } from '@/lib/emailEngagement'
+import { resolveResendEmailId } from '@/lib/resendEmail'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { filterLeadAfterBounce, handleEngagementGate } from '@/lib/sequenceGating'
 
@@ -61,16 +62,27 @@ export async function POST(request: Request) {
   return NextResponse.json({ received: true })
 }
 
+/** GET — quick config check (no secrets exposed). */
+export async function GET() {
+  return NextResponse.json({
+    webhook_secret_set: Boolean(process.env.RESEND_WEBHOOK_SECRET),
+    supabase_admin_set: Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
+    ),
+    resend_api_key_set: Boolean(process.env.RESEND_API_KEY),
+  })
+}
+
 async function processWebhookEvent(event: ResendWebhookPayload) {
   const supabase = getSupabaseAdmin()
   if (!supabase) {
-    console.warn('Supabase admin not configured; skipping webhook DB writes')
+    console.error('SUPABASE_SERVICE_ROLE_KEY missing — webhook cannot update engagement')
     return
   }
 
-  const emailId = event.data?.email_id
+  const emailId = resolveResendEmailId(event)
   if (!emailId) {
-    console.warn('Webhook event missing email_id:', event.type)
+    console.warn('Webhook event missing email_id:', event.type, JSON.stringify(event.data ?? {}))
     return
   }
 
@@ -98,7 +110,10 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
     .maybeSingle()
 
   if (!task) {
-    console.warn(`No sequence_task found for resend_email_id=${emailId}`)
+    console.warn(
+      `No sequence_task for resend_email_id=${emailId} (event=${event.type}). ` +
+      'Ensure SUPABASE_SERVICE_ROLE_KEY is set and send route saves sequence_task_id.',
+    )
     return
   }
 

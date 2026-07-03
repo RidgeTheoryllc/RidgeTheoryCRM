@@ -34,11 +34,18 @@ export async function requestSendEmail(
   subject: string,
   text: string,
   leadId?: string,
+  sequenceTaskId?: string,
 ) {
   const response = await fetch('/api/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, text, lead_id: leadId }),
+    body: JSON.stringify({
+      to,
+      subject,
+      text,
+      lead_id: leadId,
+      sequence_task_id: sequenceTaskId,
+    }),
   })
   const data = await response.json()
   if (!response.ok) {
