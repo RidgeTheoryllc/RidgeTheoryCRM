@@ -1,4 +1,4 @@
-import type { SequenceChannel, SequenceTask, SequenceTriggerType } from '@/types'
+import type { SequenceChannel, SequenceTask, SequenceTaskStatus, SequenceTriggerType } from '@/types'
 
 export const CLOSE_LOOP_TITLE = 'Close Loop'
 
@@ -10,7 +10,7 @@ export interface EngagementStepTemplate {
   trigger_type: SequenceTriggerType
 }
 
-/** 2 emails → LinkedIn → phone → close. Opens unlock next email; Email 2 open unlocks LinkedIn + phone; close unlocks after both are done. */
+/** 2 emails → LinkedIn → phone → close. Each step unlocks only after the prior step completes. */
 export const ENGAGEMENT_GATED_SEQUENCE: EngagementStepTemplate[] = [
   {
     day_number: 1,
@@ -49,23 +49,22 @@ export const ENGAGEMENT_GATED_SEQUENCE: EngagementStepTemplate[] = [
   },
 ]
 
+const TERMINAL_STATUSES: SequenceTaskStatus[] = ['done', 'sent', 'skipped']
+
+export function isEngagementStepComplete(status: SequenceTaskStatus): boolean {
+  return TERMINAL_STATUSES.includes(status)
+}
+
 export function isCloseLoopTask(task: Pick<SequenceTask, 'title' | 'channel'>): boolean {
   return task.channel === 'email' && task.title === CLOSE_LOOP_TITLE
 }
 
-export function areManualEngagementStepsComplete(
+export function findSequenceTaskByChannel(
   tasks: SequenceTask[],
   sequenceId: string,
-): boolean {
-  const manual = tasks.filter(
-    (task) =>
-      task.sequence_id === sequenceId &&
-      (task.channel === 'linkedin' || task.channel === 'phone'),
-  )
-  return (
-    manual.length >= 2 &&
-    manual.every((task) => task.status === 'done' || task.status === 'sent' || task.status === 'skipped')
-  )
+  channel: 'linkedin' | 'phone',
+): SequenceTask | undefined {
+  return tasks.find((task) => task.sequence_id === sequenceId && task.channel === channel)
 }
 
 export function findCloseLoopTask(
@@ -75,8 +74,19 @@ export function findCloseLoopTask(
   return tasks.find((task) => task.sequence_id === sequenceId && isCloseLoopTask(task))
 }
 
-/** Hide close-loop email until LinkedIn and phone are marked done. */
+/** Hide phone/close-loop until the prior engagement step is marked done. */
 export function isOutreachTaskActionable(task: SequenceTask, allTasks: SequenceTask[]): boolean {
-  if (!isCloseLoopTask(task) || task.status !== 'pending') return true
-  return areManualEngagementStepsComplete(allTasks, task.sequence_id)
+  if (task.status !== 'pending') return true
+
+  if (task.channel === 'phone') {
+    const linkedin = findSequenceTaskByChannel(allTasks, task.sequence_id, 'linkedin')
+    return linkedin ? isEngagementStepComplete(linkedin.status) : false
+  }
+
+  if (isCloseLoopTask(task)) {
+    const phone = findSequenceTaskByChannel(allTasks, task.sequence_id, 'phone')
+    return phone ? isEngagementStepComplete(phone.status) : false
+  }
+
+  return true
 }

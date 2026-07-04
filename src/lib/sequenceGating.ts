@@ -143,15 +143,14 @@ export async function handleEngagementGate(
   }
 
   if (emailIndex === 1) {
-    const lockedManual = sequenceTasks.filter(
-      (row) =>
-        row.status === 'locked' && (row.channel === 'linkedin' || row.channel === 'phone'),
+    const linkedin = sequenceTasks.find(
+      (row) => row.channel === 'linkedin' && row.status === 'locked',
     )
-    for (const locked of lockedManual) {
+    if (linkedin) {
       await supabase
         .from('sequence_tasks')
         .update({ status: 'pending', due_date: today })
-        .eq('id', locked.id)
+        .eq('id', linkedin.id)
     }
 
     await promoteLeadToWarmServer(supabase, task.lead_id)
@@ -161,6 +160,32 @@ export async function handleEngagementGate(
       .update({ status: 'active' })
       .eq('id', task.sequence_id)
   }
+}
+
+export async function unlockPhoneIfReady(
+  supabase: SupabaseClient,
+  sequenceId: string,
+  eventAt = new Date().toISOString(),
+): Promise<void> {
+  const { data: sequenceTasks, error } = await supabase
+    .from('sequence_tasks')
+    .select('id, channel, status')
+    .eq('sequence_id', sequenceId)
+
+  if (error || !sequenceTasks?.length) return
+
+  const linkedin = sequenceTasks.find((row) => row.channel === 'linkedin')
+  const linkedinComplete =
+    linkedin?.status === 'done' || linkedin?.status === 'sent' || linkedin?.status === 'skipped'
+  if (!linkedinComplete) return
+
+  const phone = sequenceTasks.find((row) => row.channel === 'phone' && row.status === 'locked')
+  if (!phone) return
+
+  await supabase
+    .from('sequence_tasks')
+    .update({ status: 'pending', due_date: eventAt.slice(0, 10) })
+    .eq('id', phone.id)
 }
 
 export async function unlockCloseLoopIfReady(
@@ -175,14 +200,10 @@ export async function unlockCloseLoopIfReady(
 
   if (error || !sequenceTasks?.length) return
 
-  const manual = sequenceTasks.filter(
-    (row) => row.channel === 'linkedin' || row.channel === 'phone',
-  )
-  const manualComplete =
-    manual.length >= 2 &&
-    manual.every((row) => row.status === 'done' || row.status === 'sent' || row.status === 'skipped')
-
-  if (!manualComplete) return
+  const phone = sequenceTasks.find((row) => row.channel === 'phone')
+  const phoneComplete =
+    phone?.status === 'done' || phone?.status === 'sent' || phone?.status === 'skipped'
+  if (!phoneComplete) return
 
   const closeLoop = sequenceTasks.find(
     (row) => row.channel === 'email' && row.title === 'Close Loop' && row.status === 'locked',

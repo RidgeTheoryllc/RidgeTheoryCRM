@@ -301,7 +301,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Email 1 goes out first. Opens unlock Email 2; opens on Email 2 unlock LinkedIn and phone — and add the lead to Warm/Contacts. Close Loop unlocks after LinkedIn and phone are marked done.
+          Email 1 goes out first. Opens unlock Email 2; opens on Email 2 unlock LinkedIn and add the lead to Warm/Contacts. Phone unlocks after LinkedIn is done; Close Loop unlocks after phone is done.
         </p>
         {message && (
           <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
