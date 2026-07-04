@@ -11,20 +11,52 @@
 
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
-import { canUpgradeEngagement, type EmailEngagement } from '@/lib/emailEngagement'
+import { canUpgradeEngagement } from '@/lib/emailEngagement'
 import { resolveResendEmailId } from '@/lib/resendEmail'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { filterLeadAfterBounce, handleEngagementGate } from '@/lib/sequenceGating'
+import { checkEngagementSchema, resolveWebhookSequenceTask } from '@/lib/webhookTaskLookup'
 
 interface ResendWebhookPayload {
   type: string
   created_at?: string
   data?: {
     email_id?: string
+    id?: string
     created_at?: string
+    to?: string[]
+    tags?: Record<string, string>
     bounce?: { message?: string }
     click?: { link?: string }
   }
+}
+
+export async function GET() {
+  const supabase = getSupabaseAdmin()
+  const base = {
+    webhook_secret_set: Boolean(process.env.RESEND_WEBHOOK_SECRET),
+    supabase_admin_set: Boolean(
+      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
+    ),
+    resend_api_key_set: Boolean(process.env.RESEND_API_KEY),
+    engagement_columns_ok: false,
+    engagement_columns_error: null as string | null,
+    email_events_count: null as number | null,
+  }
+
+  if (supabase) {
+    const schema = await checkEngagementSchema(supabase)
+    base.engagement_columns_ok = schema.ok
+    base.engagement_columns_error = schema.error
+
+    const { count, error } = await supabase
+      .from('email_events')
+      .select('*', { count: 'exact', head: true })
+
+    if (!error) base.email_events_count = count
+  }
+
+  return NextResponse.json(base)
 }
 
 export async function POST(request: Request) {
@@ -42,9 +74,11 @@ export async function POST(request: Request) {
     event = resend.webhooks.verify({
       payload,
       headers: {
-        id: request.headers.get('svix-id') ?? '',
-        timestamp: request.headers.get('svix-timestamp') ?? '',
-        signature: request.headers.get('svix-signature') ?? '',
+        id: request.headers.get('svix-id') ?? request.headers.get('webhook-id') ?? '',
+        timestamp:
+          request.headers.get('svix-timestamp') ?? request.headers.get('webhook-timestamp') ?? '',
+        signature:
+          request.headers.get('svix-signature') ?? request.headers.get('webhook-signature') ?? '',
       },
       webhookSecret,
     }) as ResendWebhookPayload
@@ -60,17 +94,6 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ received: true })
-}
-
-/** GET — quick config check (no secrets exposed). */
-export async function GET() {
-  return NextResponse.json({
-    webhook_secret_set: Boolean(process.env.RESEND_WEBHOOK_SECRET),
-    supabase_admin_set: Boolean(
-      process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-    ),
-    resend_api_key_set: Boolean(process.env.RESEND_API_KEY),
-  })
 }
 
 async function processWebhookEvent(event: ResendWebhookPayload) {
@@ -89,45 +112,39 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
   const eventType = event.type.replace('email.', '')
   const eventAt = event.created_at ?? event.data?.created_at ?? new Date().toISOString()
 
-  const { data: eventRow, error: insertError } = await supabase
-    .from('email_events')
-    .insert({
-      resend_message_id: emailId,
-      event_type: eventType,
-      raw_payload: event,
-    })
-    .select('id')
-    .single()
+  const { error: insertError } = await supabase.from('email_events').insert({
+    resend_message_id: emailId,
+    event_type: eventType,
+    raw_payload: event,
+  })
 
   if (insertError) {
-    console.error('Failed to insert email_events:', insertError)
+    console.error('Failed to insert email_events (run email-engagement.sql?):', insertError.message)
   }
 
-  const { data: task } = await supabase
-    .from('sequence_tasks')
-    .select('id, lead_id, sequence_id, day_number, channel, status, delivered_at, opened_at, open_count, clicked_at, click_count, bounced_at')
-    .eq('resend_email_id', emailId)
-    .maybeSingle()
+  const { task } = await resolveWebhookSequenceTask(supabase, event)
 
   if (!task) {
     console.warn(
-      `No sequence_task for resend_email_id=${emailId} (event=${event.type}). ` +
-      'Ensure SUPABASE_SERVICE_ROLE_KEY is set and send route saves sequence_task_id.',
+      `No sequence_task for email_id=${emailId} event=${event.type} to=${JSON.stringify(event.data?.to ?? [])}`,
     )
     return
   }
 
-  if (eventRow?.id) {
-    await supabase
-      .from('email_events')
-      .update({ sequence_task_id: task.id, lead_id: task.lead_id })
-      .eq('id', eventRow.id)
-  }
+  const taskId = task.id as string
+  const leadId = task.lead_id as string
+  const sequenceId = task.sequence_id as string
+
+  await supabase
+    .from('email_events')
+    .update({ sequence_task_id: taskId, lead_id: leadId })
+    .eq('resend_message_id', emailId)
+    .is('sequence_task_id', null)
 
   const { data: lead } = await supabase
     .from('leads')
     .select('id, email_engagement, total_email_opens, total_email_clicks')
-    .eq('id', task.lead_id)
+    .eq('id', leadId)
     .maybeSingle()
 
   if (!lead) return
@@ -152,9 +169,9 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
     case 'email.opened':
       await handleEngagementGate(supabase, task, eventAt)
       if (!task.opened_at) taskUpdates.opened_at = eventAt
-      taskUpdates.open_count = (task.open_count ?? 0) + 1
+      taskUpdates.open_count = Number(task.open_count ?? 0) + 1
       leadUpdates.last_email_opened_at = eventAt
-      leadUpdates.total_email_opens = (lead.total_email_opens ?? 0) + 1
+      leadUpdates.total_email_opens = Number(lead.total_email_opens ?? 0) + 1
       if (canUpgradeEngagement(lead.email_engagement, 'opened')) {
         leadUpdates.email_engagement = 'opened'
       }
@@ -163,9 +180,9 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
     case 'email.clicked':
       await handleEngagementGate(supabase, task, eventAt, true)
       if (!task.clicked_at) taskUpdates.clicked_at = eventAt
-      taskUpdates.click_count = (task.click_count ?? 0) + 1
+      taskUpdates.click_count = Number(task.click_count ?? 0) + 1
       leadUpdates.last_email_clicked_at = eventAt
-      leadUpdates.total_email_clicks = (lead.total_email_clicks ?? 0) + 1
+      leadUpdates.total_email_clicks = Number(lead.total_email_clicks ?? 0) + 1
       leadUpdates.email_engagement = 'clicked'
       break
 
@@ -175,17 +192,15 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
       leadUpdates.email_engagement = 'bounced'
       leadUpdates.email_valid = false
       leadUpdates.email_status = 'invalid'
-      await filterLeadAfterBounce(supabase, task.lead_id, task.sequence_id)
+      await filterLeadAfterBounce(supabase, leadId, sequenceId)
       break
 
     case 'email.complained':
-      console.error(
-        `SPAM COMPLAINT for lead ${task.lead_id}, email_id ${emailId} — affects sender reputation`,
-      )
+      console.error(`SPAM COMPLAINT for lead ${leadId}, email_id ${emailId}`)
       leadUpdates.email_engagement = 'bounced'
       leadUpdates.email_valid = false
       leadUpdates.email_status = 'invalid'
-      await filterLeadAfterBounce(supabase, task.lead_id, task.sequence_id)
+      await filterLeadAfterBounce(supabase, leadId, sequenceId)
       break
 
     default:
@@ -193,12 +208,16 @@ async function processWebhookEvent(event: ResendWebhookPayload) {
   }
 
   if (Object.keys(taskUpdates).length > 0) {
-    const { error } = await supabase.from('sequence_tasks').update(taskUpdates).eq('id', task.id)
-    if (error) console.error('Failed to update sequence_task:', error)
+    const { error } = await supabase.from('sequence_tasks').update(taskUpdates).eq('id', taskId)
+    if (error) {
+      console.error('Failed to update sequence_task:', error.message, taskUpdates)
+    }
   }
 
   if (Object.keys(leadUpdates).length > 0) {
     const { error } = await supabase.from('leads').update(leadUpdates).eq('id', lead.id)
-    if (error) console.error('Failed to update lead:', error)
+    if (error) {
+      console.error('Failed to update lead:', error.message, leadUpdates)
+    }
   }
 }

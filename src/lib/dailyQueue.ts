@@ -1,4 +1,5 @@
 import type { Lead, SequenceTask } from '@/types'
+import { isOutreachTaskActionable } from '@/lib/engagementSequence'
 
 export function todayDateString(): string {
   return new Date().toISOString().slice(0, 10)
@@ -10,6 +11,7 @@ export function getTodaysOutreachTasks(
 ): SequenceTask[] {
   return tasks
     .filter((task) => task.status === 'pending' && task.due_date <= today)
+    .filter((task) => isOutreachTaskActionable(task, tasks))
     .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.day_number - b.day_number)
 }
 
@@ -19,6 +21,7 @@ export function getUpcomingTasks(
 ): SequenceTask[] {
   return tasks
     .filter((task) => task.status === 'pending' && task.due_date > today)
+    .filter((task) => isOutreachTaskActionable(task, tasks))
     .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.day_number - b.day_number)
 }
 

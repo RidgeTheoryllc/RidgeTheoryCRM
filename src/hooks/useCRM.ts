@@ -24,7 +24,7 @@ import { scoreLead } from '@/lib/leadScoring'
 import { advanceLeadStatus, resolveNewLeadStatus } from '@/lib/leadStatus'
 import { statusAfterEmailCleansing, verifyLeadEmail } from '@/lib/emailCleansing'
 import { buildEngagementGatedTask } from '@/lib/prospecting'
-import { ENGAGEMENT_GATED_SEQUENCE } from '@/lib/engagementSequence'
+import { ENGAGEMENT_GATED_SEQUENCE, areManualEngagementStepsComplete, findCloseLoopTask } from '@/lib/engagementSequence'
 import {
   companyFromLead, contactFromLead, findCompanyForLead, findContactForLead,
   findSiblingLeadContactId,
@@ -538,7 +538,29 @@ export function useCRM(profile?: Profile | null) {
     if (!existing) return
 
     const updated = record ?? { ...existing, ...data }
-    const nextTasks = sequenceTasks.map((task) => (task.id === id ? updated : task))
+    let nextTasks = sequenceTasks.map((task) => (task.id === id ? updated : task))
+
+    if (
+      updated.status === 'done' &&
+      (updated.channel === 'linkedin' || updated.channel === 'phone') &&
+      areManualEngagementStepsComplete(nextTasks, updated.sequence_id)
+    ) {
+      const closeLoop = findCloseLoopTask(nextTasks, updated.sequence_id)
+      if (closeLoop?.status === 'locked') {
+        const today = new Date().toISOString().slice(0, 10)
+        const unlocked = await updateSequenceTaskRecord(closeLoop.id, {
+          status: 'pending',
+          due_date: today,
+        })
+        if (unlocked) {
+          nextTasks = nextTasks.map((task) => (task.id === closeLoop.id ? unlocked : task))
+        } else {
+          nextTasks = nextTasks.map((task) =>
+            task.id === closeLoop.id ? { ...task, status: 'pending', due_date: today } : task,
+          )
+        }
+      }
+    }
 
     setSequenceTasks(() => {
       saveKey('crm:sequenceTasks', nextTasks)

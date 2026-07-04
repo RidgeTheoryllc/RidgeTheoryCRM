@@ -143,8 +143,11 @@ export async function handleEngagementGate(
   }
 
   if (emailIndex === 1) {
-    const lockedTasks = sequenceTasks.filter((row) => row.status === 'locked')
-    for (const locked of lockedTasks) {
+    const lockedManual = sequenceTasks.filter(
+      (row) =>
+        row.status === 'locked' && (row.channel === 'linkedin' || row.channel === 'phone'),
+    )
+    for (const locked of lockedManual) {
       await supabase
         .from('sequence_tasks')
         .update({ status: 'pending', due_date: today })
@@ -158,6 +161,38 @@ export async function handleEngagementGate(
       .update({ status: 'active' })
       .eq('id', task.sequence_id)
   }
+}
+
+export async function unlockCloseLoopIfReady(
+  supabase: SupabaseClient,
+  sequenceId: string,
+  eventAt = new Date().toISOString(),
+): Promise<void> {
+  const { data: sequenceTasks, error } = await supabase
+    .from('sequence_tasks')
+    .select('id, channel, title, status')
+    .eq('sequence_id', sequenceId)
+
+  if (error || !sequenceTasks?.length) return
+
+  const manual = sequenceTasks.filter(
+    (row) => row.channel === 'linkedin' || row.channel === 'phone',
+  )
+  const manualComplete =
+    manual.length >= 2 &&
+    manual.every((row) => row.status === 'done' || row.status === 'sent' || row.status === 'skipped')
+
+  if (!manualComplete) return
+
+  const closeLoop = sequenceTasks.find(
+    (row) => row.channel === 'email' && row.title === 'Close Loop' && row.status === 'locked',
+  )
+  if (!closeLoop) return
+
+  await supabase
+    .from('sequence_tasks')
+    .update({ status: 'pending', due_date: eventAt.slice(0, 10) })
+    .eq('id', closeLoop.id)
 }
 
 export async function filterLeadAfterBounce(

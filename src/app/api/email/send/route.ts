@@ -27,7 +27,13 @@ export async function POST(request: Request) {
     )
   }
 
+  const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : ''
+  const sequenceTaskId = typeof body.sequence_task_id === 'string' ? body.sequence_task_id.trim() : ''
   const text = String(body.text)
+  const tags: { name: string; value: string }[] = []
+  if (sequenceTaskId) tags.push({ name: 'sequence_task_id', value: sequenceTaskId })
+  if (leadId) tags.push({ name: 'lead_id', value: leadId })
+
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -40,6 +46,7 @@ export async function POST(request: Request) {
       subject: body.subject,
       text,
       html: textToTrackingHtml(text),
+      ...(tags.length > 0 ? { tags } : {}),
     }),
   })
 
@@ -53,9 +60,7 @@ export async function POST(request: Request) {
   }
 
   const resendId = typeof data.id === 'string' ? data.id : ''
-  const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : ''
-  const sequenceTaskId = typeof body.sequence_task_id === 'string' ? body.sequence_task_id.trim() : ''
-
+  let taskLinked = false
   const supabase = getSupabaseAdmin()
   if (supabase) {
     try {
@@ -71,7 +76,9 @@ export async function POST(request: Request) {
           .eq('id', sequenceTaskId)
 
         if (taskError) {
-          console.error('Failed to link resend_email_id on sequence_task:', taskError)
+          console.error('Failed to link resend_email_id on sequence_task:', taskError.message)
+        } else {
+          taskLinked = true
         }
       }
 
@@ -100,5 +107,5 @@ export async function POST(request: Request) {
     console.warn('SUPABASE_SERVICE_ROLE_KEY not set — resend_email_id not saved server-side; webhooks cannot match emails')
   }
 
-  return NextResponse.json({ id: resendId })
+  return NextResponse.json({ id: resendId, task_linked: taskLinked })
 }
