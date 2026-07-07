@@ -33,6 +33,7 @@ import {
   companyFromLead, contactFromLead, findCompanyForLead, findContactForLead,
   findSiblingLeadContactId,
 } from '@/lib/leadPromotion'
+import { requestAutoSendEmail } from '@/lib/outreachApi'
 
 function isTerminalTaskStatus(status: SequenceTaskStatus) {
   return status === 'sent' || status === 'done' || status === 'skipped'
@@ -79,6 +80,7 @@ export function useCRM(profile?: Profile | null) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [prospectingSequences, setProspectingSequences] = useState<ProspectingSequence[]>([])
   const [sequenceTasks, setSequenceTasks] = useState<SequenceTask[]>([])
+  const [autoSendingTaskIds, setAutoSendingTaskIds] = useState<string[]>([])
   // Start ready=true so we never block render with a loading gate.
   const [ready, setReady] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -291,6 +293,18 @@ export function useCRM(profile?: Profile | null) {
     return cleansing
   }, [leads, updateLead])
 
+  const triggerAutoSend = useCallback(async (taskId: string) => {
+    setAutoSendingTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]))
+    try {
+      return await requestAutoSendEmail(taskId)
+    } catch (err) {
+      console.warn('Auto-send failed:', err)
+      return { sent: false as const }
+    } finally {
+      setAutoSendingTaskIds((prev) => prev.filter((id) => id !== taskId))
+    }
+  }, [])
+
   const enrollLeadInSequence = useCallback(async (id: string) => {
     const lead = leads.find((l) => l.id === id)
     if (!lead) return null
@@ -335,20 +349,12 @@ export function useCRM(profile?: Profile | null) {
 
     const email1 = createdTasks.find((task) => task.day_number === 1 && task.channel === 'email')
     if (email1 && scoredLead.email?.trim() && scoredLead.email_valid !== false) {
-      try {
-        await fetch('/api/email/auto-send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sequence_task_id: email1.id }),
-        })
-      } catch (err) {
-        console.warn('Auto-send Email 1 failed:', err)
-      }
+      await triggerAutoSend(email1.id)
     }
 
     await updateLead(id, { status: prospectingStatus, ...score })
     return sequence
-  }, [leads, ownerId, prospectingSequences, updateLead])
+  }, [leads, ownerId, prospectingSequences, updateLead, triggerAutoSend])
 
   const deleteLead = useCallback(async (id: string) => {
     await deleteLeadRecord(id)
@@ -556,6 +562,7 @@ export function useCRM(profile?: Profile | null) {
 
     const updated = record ?? { ...existing, ...data }
     let nextTasks = sequenceTasks.map((task) => (task.id === id ? updated : task))
+    let closeLoopToAutoSend: string | null = null
 
     if (updated.status === 'done' && updated.channel === 'linkedin') {
       const phone = findSequenceTaskByChannel(nextTasks, updated.sequence_id, 'phone')
@@ -577,18 +584,26 @@ export function useCRM(profile?: Profile | null) {
 
     if (updated.status === 'done' && updated.channel === 'phone') {
       const closeLoop = findCloseLoopTask(nextTasks, updated.sequence_id)
-      if (closeLoop?.status === 'locked') {
-        const today = new Date().toISOString().slice(0, 10)
-        const unlocked = await updateSequenceTaskRecord(closeLoop.id, {
-          status: 'pending',
-          due_date: today,
-        })
-        if (unlocked) {
-          nextTasks = nextTasks.map((task) => (task.id === closeLoop.id ? unlocked : task))
-        } else {
-          nextTasks = nextTasks.map((task) =>
-            task.id === closeLoop.id ? { ...task, status: 'pending', due_date: today } : task,
-          )
+      if (closeLoop) {
+        let closeLoopTask = closeLoop
+        if (closeLoop.status === 'locked') {
+          const today = new Date().toISOString().slice(0, 10)
+          const unlocked = await updateSequenceTaskRecord(closeLoop.id, {
+            status: 'pending',
+            due_date: today,
+          })
+          if (unlocked) {
+            closeLoopTask = unlocked
+            nextTasks = nextTasks.map((task) => (task.id === closeLoop.id ? unlocked : task))
+          } else {
+            closeLoopTask = { ...closeLoop, status: 'pending', due_date: today }
+            nextTasks = nextTasks.map((task) =>
+              task.id === closeLoop.id ? closeLoopTask : task,
+            )
+          }
+        }
+        if (closeLoopTask.status === 'pending' && !closeLoopTask.resend_email_id) {
+          closeLoopToAutoSend = closeLoopTask.id
         }
       }
     }
@@ -597,6 +612,10 @@ export function useCRM(profile?: Profile | null) {
       saveKey('crm:sequenceTasks', nextTasks)
       return nextTasks
     })
+
+    if (closeLoopToAutoSend) {
+      await triggerAutoSend(closeLoopToAutoSend)
+    }
 
     if (!isTerminalTaskStatus(updated.status)) return
 
@@ -624,11 +643,12 @@ export function useCRM(profile?: Profile | null) {
         status: advanceLeadStatus(lead.status, 'Qualified'),
       })
     }
-  }, [leads, prospectingSequences, sequenceTasks, updateLead])
+  }, [leads, prospectingSequences, sequenceTasks, updateLead, triggerAutoSend])
 
   return {
     companies, leads, contacts, deals, activities, tasks,
     prospectingSequences, sequenceTasks,
+    autoSendingTaskIds,
     ready, error,
     addCompany, updateCompany, deleteCompany,
     addLead, updateLead, deleteLead, rescoreLead, promoteLeadToWarm, reverifyLeadEmail, enrollLeadInSequence,

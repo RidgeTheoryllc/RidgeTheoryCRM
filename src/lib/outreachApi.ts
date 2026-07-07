@@ -29,6 +29,20 @@ export async function requestProspectingDraft(lead: Lead, task: SequenceTask) {
   return data as { subject?: string; body?: string; script?: string }
 }
 
+export async function requestAutoSendEmail(sequenceTaskId: string) {
+  const response = await fetch('/api/email/auto-send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sequence_task_id: sequenceTaskId }),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    const err = typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+    throw new Error(err || 'Auto-send failed')
+  }
+  return data as { sent: boolean; id?: string; skipped?: string }
+}
+
 export async function requestSendEmail(
   to: string,
   subject: string,

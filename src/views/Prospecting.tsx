@@ -183,15 +183,27 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
 
   async function markDone(task: SequenceTask) {
     setBusyTask(task.id)
+    setMessage(null)
+    if (task.channel === 'phone') {
+      setMessage('Call marked done. Sending close email…')
+    }
     try {
       await crm.updateSequenceTask(task.id, {
         status: 'done',
         completed_at: new Date().toISOString(),
       })
-      setMessage(`${task.title} marked done.`)
+      if (task.channel === 'phone') {
+        setMessage('Call marked done. Close email sent.')
+      } else {
+        setMessage(`${task.title} marked done.`)
+      }
     } finally {
       setBusyTask(null)
     }
+  }
+
+  function isAutoSending(taskId: string) {
+    return crm.autoSendingTaskIds.includes(taskId)
   }
 
   async function bulkGenerate() {
@@ -337,6 +349,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
               expandedTaskId={expandedTaskId}
               busyTask={busyTask}
               generatingTaskId={generatingTaskId}
+              isAutoSending={isAutoSending}
               getLead={getLead}
               emailReady={emailReady}
               onToggleSelect={toggleSelect}
@@ -415,6 +428,7 @@ function StepPanel({
   expandedTaskId,
   busyTask,
   generatingTaskId,
+  isAutoSending,
   getLead,
   emailReady,
   onToggleSelect,
@@ -444,6 +458,7 @@ function StepPanel({
   expandedTaskId: string | null
   busyTask: string | null
   generatingTaskId: string | null
+  isAutoSending: (taskId: string) => boolean
   getLead: (task: SequenceTask) => Lead | undefined
   emailReady: (task: SequenceTask) => boolean
   onToggleSelect: (id: string) => void
@@ -537,6 +552,7 @@ function StepPanel({
                     const lead = getLead(task)
                     const ready = emailReady(task)
                     const expanded = expandedTaskId === task.id
+                    const autoSending = isAutoSending(task.id)
                     return (
                       <Fragment key={task.id}>
                         <TableRow className={cn(expanded && 'border-b-0 bg-muted/30')}>
@@ -559,7 +575,12 @@ function StepPanel({
                             </TableCell>
                           )}
                           <TableCell>
-                            {isEmailStep ? (
+                            {autoSending ? (
+                              <Badge className="bg-blue-100 text-blue-700">
+                                <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                                Sending…
+                              </Badge>
+                            ) : isEmailStep ? (
                               <Badge className={ready ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
                                 {ready ? 'Ready' : 'Needs draft'}
                               </Badge>
@@ -579,17 +600,29 @@ function StepPanel({
                               {isEmailStep && (
                                 <Button
                                   size="sm"
-                                  disabled={busyTask === task.id || !ready}
+                                  disabled={busyTask === task.id || autoSending || !ready}
                                   onClick={() => onSend(task)}
                                 >
-                                  <Send className="h-3.5 w-3.5" />
-                                  Send
+                                  {autoSending ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Send className="h-3.5 w-3.5" />
+                                  )}
+                                  {autoSending ? 'Sending…' : 'Send'}
                                 </Button>
                               )}
                               {isManualStep && (
-                                <Button size="sm" disabled={busyTask === task.id} onClick={() => onDone(task)}>
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                  Done
+                                <Button
+                                  size="sm"
+                                  disabled={busyTask === task.id || autoSending}
+                                  onClick={() => onDone(task)}
+                                >
+                                  {busyTask === task.id ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  )}
+                                  {busyTask === task.id && task.channel === 'phone' ? 'Sending…' : 'Done'}
                                 </Button>
                               )}
                             </div>
@@ -603,6 +636,7 @@ function StepPanel({
                                 lead={lead}
                                 isEmail={isEmailStep}
                                 busy={busyTask === task.id}
+                                autoSending={autoSending}
                                 generating={generatingTaskId === task.id}
                                 ready={ready}
                                 onGenerate={() => onGenerate(task)}
@@ -659,6 +693,7 @@ function TaskExpand({
   lead,
   isEmail,
   busy,
+  autoSending,
   generating,
   ready,
   onGenerate,
@@ -669,6 +704,7 @@ function TaskExpand({
   lead?: Lead
   isEmail: boolean
   busy: boolean
+  autoSending: boolean
   generating: boolean
   ready: boolean
   onGenerate: () => void
@@ -678,6 +714,12 @@ function TaskExpand({
   if (isEmail) {
     return (
       <div className="space-y-3">
+        {autoSending && (
+          <p className="flex items-center gap-2 text-sm text-blue-700">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Auto-sending email…
+          </p>
+        )}
         {task.generated_subject && (
           <div>
             <div className="text-xs font-medium text-muted-foreground">Subject</div>
@@ -690,13 +732,13 @@ function TaskExpand({
           </pre>
         )}
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled={busy} onClick={onGenerate}>
+          <Button variant="outline" size="sm" disabled={busy || autoSending} onClick={onGenerate}>
             {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {task.generated_body ? 'Regenerate' : 'Generate'}
           </Button>
-          <Button size="sm" disabled={busy || !ready} onClick={onSend}>
-            <Send className="h-3.5 w-3.5" />
-            Send
+          <Button size="sm" disabled={busy || autoSending || !ready} onClick={onSend}>
+            {autoSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            {autoSending ? 'Sending…' : 'Send'}
           </Button>
         </div>
       </div>
@@ -720,8 +762,8 @@ function TaskExpand({
           Generate script
         </Button>
         <Button size="sm" disabled={busy} onClick={onDone}>
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Mark done
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          {busy && task.channel === 'phone' ? 'Sending close email…' : 'Mark done'}
         </Button>
       </div>
     </div>

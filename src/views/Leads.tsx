@@ -168,7 +168,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
 
   async function enrollLead(id: string) {
     setEnrolling(id)
-    setImportMessage(null)
+    setImportMessage('Enrolling and sending first email…')
     try {
       await crm.enrollLeadInSequence(id)
       setSelectedIds((prev) => {
@@ -176,7 +176,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
         next.delete(id)
         return next
       })
-      setImportMessage('Lead enrolled into the recommended prospecting sequence.')
+      setImportMessage('Lead enrolled and first email sent.')
     } catch (error) {
       console.error('Failed to enroll lead:', error)
       setImportMessage('Could not enroll that lead.')
@@ -324,7 +324,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
 
     try {
       for (const lead of targets) {
-        setImportMessage(`Enrolling leads… ${done + failed + 1} of ${targets.length}`)
+        setImportMessage(`Enrolling and sending… ${done + failed + 1} of ${targets.length}`)
         try {
           await crm.enrollLeadInSequence(lead.id)
           done += 1
@@ -337,7 +337,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
       setImportMessage(
         failed > 0
           ? `Enrolled ${done} lead${done === 1 ? '' : 's'}, ${failed} failed.`
-          : `Enrolled ${done} lead${done === 1 ? '' : 's'} into prospecting sequences.`,
+          : `Enrolled ${done} lead${done === 1 ? '' : 's'} and sent first emails.`,
       )
     } finally {
       setBulkEnrolling(false)
@@ -486,7 +486,7 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                   disabled={bulkBusy || enrolling !== null || selectedEnrollableCount === 0}
                 >
                   {bulkEnrolling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  Enroll selected ({selectedEnrollableCount})
+                  Enroll & send ({selectedEnrollableCount})
                 </Button>
               )}
               <Button
@@ -635,7 +635,14 @@ export function Leads({ crm, onNew }: { crm: CRMStore; onNew: (t: string) => voi
                               className="h-7 shrink-0 px-2 text-xs"
                               disabled={bulkBusy || enrolling === lead.id}
                             >
-                              {enrolling === lead.id ? '…' : 'Enroll'}
+                              {enrolling === lead.id ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Sending…
+                                </>
+                              ) : (
+                                'Enroll'
+                              )}
                             </Button>
                           )}
                           <Button
