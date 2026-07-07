@@ -1,14 +1,15 @@
 'use client'
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import {
   Mail, Phone, Linkedin, Sparkles, Send, CheckCircle2,
-  ChevronDown, ChevronUp, Loader2, ChevronRight, Search,
+  ChevronDown, ChevronUp, Loader2, ChevronRight, Search, History,
 } from 'lucide-react'
 import type { CRMStore } from '@/hooks/useCRM'
 import type { Lead, SequenceTask } from '@/types'
-import { cn, formatDate } from '@/lib/utils'
-import { getRecentlySentEmailTasks, todayDateString } from '@/lib/dailyQueue'
+import { cn } from '@/lib/utils'
+import { todayDateString } from '@/lib/dailyQueue'
 import {
   ENGAGEMENT_GATED_SEQUENCE,
   getTasksForStep,
@@ -82,11 +83,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   const engagementTasks = useMemo(
     () => crm.sequenceTasks.filter((t) => engagementSequenceIds.has(t.sequence_id)),
     [crm.sequenceTasks, engagementSequenceIds],
-  )
-
-  const recentlySent = useMemo(
-    () => getRecentlySentEmailTasks(engagementTasks),
-    [engagementTasks],
   )
 
   const stepCounts = useMemo(() => {
@@ -202,10 +198,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     }
   }
 
-  function isAutoSending(taskId: string) {
-    return crm.autoSendingTaskIds.includes(taskId)
-  }
-
   async function bulkGenerate() {
     const targets = dueTasks.filter((t) => selectedIds.has(t.id))
     if (!targets.length) return
@@ -248,14 +240,23 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Work one step at a time — finish Email 1, then Email 2, LinkedIn, Call, and Close.
-        </p>
-        {message && (
-          <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">{message}</p>
-        )}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Work one step at a time — finish Email 1, then Email 2, LinkedIn, Call, and Close.
+          </p>
+          {message && (
+            <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">{message}</p>
+          )}
+        </div>
+        <Link
+          href="/prospecting/history"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          <History className="h-3.5 w-3.5" />
+          History
+        </Link>
       </div>
 
       {/* Flow steps */}
@@ -302,7 +303,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
           {SEQUENCE_STEP_TABS.map((s) => (
             <TabsTrigger key={s.id} value={s.id}>{s.label}</TabsTrigger>
           ))}
-          <TabsTrigger value="tracking">Tracking</TabsTrigger>
         </TabsList>
 
         {SEQUENCE_STEP_TABS.map((step) => {
@@ -349,7 +349,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
               expandedTaskId={expandedTaskId}
               busyTask={busyTask}
               generatingTaskId={generatingTaskId}
-              isAutoSending={isAutoSending}
+              isAutoSending={(taskId) => crm.autoSendingTaskIds.includes(taskId)}
               getLead={getLead}
               emailReady={emailReady}
               onToggleSelect={toggleSelect}
@@ -362,46 +362,6 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
           )
         })}
       </Tabs>
-
-      {recentlySent.length > 0 && (
-        <Card>
-          <CardContent className="pt-6">
-            <h3 className="mb-1 text-sm font-semibold">Sent &amp; tracking</h3>
-            <p className="mb-4 text-xs text-muted-foreground">
-              Open and click status for emails you&apos;ve sent.
-            </p>
-            <div className="overflow-hidden rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Lead</TableHead>
-                    <TableHead>Step</TableHead>
-                    <TableHead>Sent</TableHead>
-                    <TableHead>Engagement</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentlySent.slice(0, 15).map((task) => {
-                    const lead = getLead(task)
-                    return (
-                      <TableRow key={task.id}>
-                        <TableCell className="font-medium">{lead?.name ?? '—'}</TableCell>
-                        <TableCell className="text-sm">{task.title}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {task.sent_at ? formatDate(task.sent_at) : '—'}
-                        </TableCell>
-                        <TableCell>
-                          <EngagementBadge variant="task" task={task} />
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   )
 }
@@ -506,7 +466,7 @@ function StepPanel({
         )}
 
         {totalDue === 0 ? (
-          <div className="rounded-lg border border-dashed py-10 text-center">
+          <div className="flex min-h-[32rem] flex-col items-center justify-center rounded-lg border border-dashed py-10 text-center">
             <p className="font-medium">No {stepLabel.toLowerCase()} tasks due</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {waitingTasks.length > 0
@@ -519,7 +479,7 @@ function StepPanel({
             <p className="text-sm text-muted-foreground">
               <strong className="font-medium text-foreground">{totalDue}</strong> lead{totalDue === 1 ? '' : 's'} ready for {stepLabel}
             </p>
-            <div className="overflow-hidden rounded-lg border">
+            <div className="min-h-[32rem] overflow-hidden rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>

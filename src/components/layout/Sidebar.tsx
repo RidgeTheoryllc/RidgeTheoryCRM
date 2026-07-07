@@ -9,7 +9,15 @@ import {
 import { Button } from '@/components/ui/button'
 import type { AppRole } from '@/types'
 
-export type Page = 'dashboard' | 'leads' | 'prospecting' | 'companies' | 'contacts' | 'pipeline' | 'tasks'
+export type Page =
+  | 'dashboard'
+  | 'leads'
+  | 'prospecting'
+  | 'prospecting-history'
+  | 'companies'
+  | 'contacts'
+  | 'pipeline'
+  | 'tasks'
 
 const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -53,7 +61,7 @@ export function Sidebar({ page, onNav, onSignOut, role, userName }: SidebarProps
             onClick={() => onNav(id)}
             className={cn(
               'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors',
-              page === id
+              page === id || (id === 'prospecting' && page === 'prospecting-history')
                 ? 'bg-primary/10 text-primary font-medium'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',
             )}
