@@ -74,7 +74,47 @@ export function findCloseLoopTask(
   return tasks.find((task) => task.sequence_id === sequenceId && isCloseLoopTask(task))
 }
 
-/** Hide phone/close-loop until the prior engagement step is marked done. */
+export const SEQUENCE_STEP_TABS = [
+  { id: 'email1', day_number: 1, label: 'Email 1', shortLabel: '1', channel: 'email' as const },
+  { id: 'email2', day_number: 2, label: 'Email 2', shortLabel: '2', channel: 'email' as const },
+  { id: 'linkedin', day_number: 3, label: 'LinkedIn', shortLabel: '3', channel: 'linkedin' as const },
+  { id: 'call', day_number: 4, label: 'Call', shortLabel: '4', channel: 'phone' as const },
+  { id: 'close', day_number: 5, label: 'Close', shortLabel: '5', channel: 'email' as const },
+] as const
+
+export type SequenceStepTabId = (typeof SEQUENCE_STEP_TABS)[number]['id']
+
+export function getTasksForStep(
+  tasks: SequenceTask[],
+  dayNumber: number,
+  today: string,
+  options?: { dueOnly?: boolean },
+): SequenceTask[] {
+  return tasks
+    .filter((task) => {
+      if (task.day_number !== dayNumber) return false
+      if (options?.dueOnly !== false) {
+        if (task.status !== 'pending') return false
+        if (task.due_date > today) return false
+        if (!isOutreachTaskActionable(task, tasks)) return false
+      }
+      return true
+    })
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))
+}
+
+/** Sent emails at this step still waiting for an open (unlocks next step). */
+export function getWaitingForOpenTasks(tasks: SequenceTask[], dayNumber: number): SequenceTask[] {
+  return tasks.filter(
+    (task) =>
+      task.day_number === dayNumber &&
+      task.channel === 'email' &&
+      task.status === 'sent' &&
+      !task.opened_at &&
+      !task.bounced_at,
+  )
+}
+
 export function isOutreachTaskActionable(task: SequenceTask, allTasks: SequenceTask[]): boolean {
   if (task.status !== 'pending') return true
 

@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { resolveOutreachFromEmail, sendSequenceEmail } from '@/lib/sendSequenceEmail'
 import { textToTrackingHtml } from '@/lib/resendEmail'
 
 export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY
-  const outreachFrom = process.env.OUTREACH_FROM_EMAIL?.trim()
-  const resendFrom = process.env.RESEND_FROM_EMAIL?.trim()
-  const from = outreachFrom && !outreachFrom.includes('your-outreach-domain')
-    ? outreachFrom
-    : resendFrom
+  const from = resolveOutreachFromEmail()
 
   if (!apiKey || !from) {
     return NextResponse.json(
@@ -30,6 +27,25 @@ export async function POST(request: Request) {
   const leadId = typeof body.lead_id === 'string' ? body.lead_id.trim() : ''
   const sequenceTaskId = typeof body.sequence_task_id === 'string' ? body.sequence_task_id.trim() : ''
   const text = String(body.text)
+  const supabase = getSupabaseAdmin()
+
+  if (supabase && sequenceTaskId && leadId) {
+    const result = await sendSequenceEmail({
+      to: body.to,
+      subject: body.subject,
+      text,
+      leadId,
+      sequenceTaskId,
+      supabase,
+    })
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 500 })
+    }
+
+    return NextResponse.json({ id: result.resendId, task_linked: result.taskLinked ?? false })
+  }
+
   const tags: { name: string; value: string }[] = []
   if (sequenceTaskId) tags.push({ name: 'sequence_task_id', value: sequenceTaskId })
   if (leadId) tags.push({ name: 'lead_id', value: leadId })
@@ -61,50 +77,20 @@ export async function POST(request: Request) {
 
   const resendId = typeof data.id === 'string' ? data.id : ''
   let taskLinked = false
-  const supabase = getSupabaseAdmin()
-  if (supabase) {
-    try {
-      if (sequenceTaskId && resendId) {
-        const { error: taskError } = await supabase
-          .from('sequence_tasks')
-          .update({
-            resend_email_id: resendId,
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', sequenceTaskId)
 
-        if (taskError) {
-          console.error('Failed to link resend_email_id on sequence_task:', taskError.message)
-        } else {
-          taskLinked = true
-        }
-      }
+  if (supabase && sequenceTaskId && resendId) {
+    const sentAt = new Date().toISOString()
+    const { error: taskError } = await supabase
+      .from('sequence_tasks')
+      .update({
+        resend_email_id: resendId,
+        status: 'sent',
+        sent_at: sentAt,
+        completed_at: sentAt,
+      })
+      .eq('id', sequenceTaskId)
 
-      if (leadId) {
-        const { data: lead } = await supabase
-          .from('leads')
-          .select('email_engagement')
-          .eq('id', leadId)
-          .maybeSingle()
-
-        if (!lead || lead.email_engagement === 'none' || !lead.email_engagement) {
-          const { error: leadError } = await supabase
-            .from('leads')
-            .update({ email_engagement: 'sent' })
-            .eq('id', leadId)
-
-          if (leadError) {
-            console.error('Failed to update lead engagement after send:', leadError)
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Post-send Supabase update failed:', err)
-    }
-  } else if (sequenceTaskId || leadId) {
-    console.warn('SUPABASE_SERVICE_ROLE_KEY not set — resend_email_id not saved server-side; webhooks cannot match emails')
+    if (!taskError) taskLinked = true
   }
 
   return NextResponse.json({ id: resendId, task_linked: taskLinked })

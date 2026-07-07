@@ -3,19 +3,19 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Mail, Phone, Linkedin, Sparkles, Send, CheckCircle2,
-  ChevronDown, ChevronUp, Loader2, CalendarClock,
+  ChevronDown, ChevronUp, Loader2, ChevronRight, Search,
 } from 'lucide-react'
 import type { CRMStore } from '@/hooks/useCRM'
 import type { Lead, SequenceTask } from '@/types'
-import { format } from 'date-fns'
 import { cn, formatDate } from '@/lib/utils'
+import { getRecentlySentEmailTasks, todayDateString } from '@/lib/dailyQueue'
 import {
-  getTodaysOutreachTasks,
-  getUpcomingTasks,
-  getRecentlySentEmailTasks,
-  groupTasksByChannel,
-  todayDateString,
-} from '@/lib/dailyQueue'
+  ENGAGEMENT_GATED_SEQUENCE,
+  getTasksForStep,
+  getWaitingForOpenTasks,
+  SEQUENCE_STEP_TABS,
+  type SequenceStepTabId,
+} from '@/lib/engagementSequence'
 import {
   isEmailReady,
   requestProspectingDraft,
@@ -24,6 +24,7 @@ import {
 import { Badge } from '@/components/ui/atoms'
 import { EngagementBadge } from '@/components/outreach/EngagementBadge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { LinkedInButton } from '@/components/ui/LinkedInButton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -38,20 +39,14 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination'
 
-const EMAIL_PAGE_SIZE = 10
+const PAGE_SIZE = 10
 
-type ProspectingTab = 'email' | 'linkedin' | 'phone' | 'upcoming'
-
-const CHANNEL_LABEL: Record<Exclude<ProspectingTab, 'upcoming'>, string> = {
-  email: 'Email',
-  linkedin: 'LinkedIn',
-  phone: 'Phone',
-}
-
-const CHANNEL_ICON = {
-  email: Mail,
+const STEP_ICONS = {
+  email1: Mail,
+  email2: Mail,
   linkedin: Linkedin,
-  phone: Phone,
+  call: Phone,
+  close: Mail,
 } as const
 
 function getPageNumbers(current: number, total: number): (number | 'ellipsis')[] {
@@ -62,58 +57,70 @@ function getPageNumbers(current: number, total: number): (number | 'ellipsis')[]
 }
 
 export function Prospecting({ crm }: { crm: CRMStore }) {
+  const [stepTab, setStepTab] = useState<SequenceStepTabId>('email1')
   const [busyTask, setBusyTask] = useState<string | null>(null)
   const [generatingTaskId, setGeneratingTaskId] = useState<string | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
-  const [selectedEmailIds, setSelectedEmailIds] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [emailPage, setEmailPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
 
   const today = useMemo(() => todayDateString(), [])
 
-  const activeTasks = useMemo(
-    () => getTodaysOutreachTasks(crm.sequenceTasks, today),
-    [crm.sequenceTasks, today],
+  const engagementSequenceIds = useMemo(
+    () =>
+      new Set(
+        crm.prospectingSequences
+          .filter((s) => s.status === 'active' && s.tier === 'engagement')
+          .map((s) => s.id),
+      ),
+    [crm.prospectingSequences],
   )
 
-  const { email: emailTasks, linkedin: linkedinTasks, phone: phoneTasks } = useMemo(
-    () => groupTasksByChannel(activeTasks),
-    [activeTasks],
+  const engagementTasks = useMemo(
+    () => crm.sequenceTasks.filter((t) => engagementSequenceIds.has(t.sequence_id)),
+    [crm.sequenceTasks, engagementSequenceIds],
   )
 
-  const upcoming = useMemo(
-    () => getUpcomingTasks(crm.sequenceTasks, today),
-    [crm.sequenceTasks, today],
+  const recentlySent = useMemo(
+    () => getRecentlySentEmailTasks(engagementTasks),
+    [engagementTasks],
   )
 
-  const recentlySentEmails = useMemo(
-    () => getRecentlySentEmailTasks(crm.sequenceTasks),
-    [crm.sequenceTasks],
+  const stepCounts = useMemo(() => {
+    const counts = {} as Record<SequenceStepTabId, number>
+    for (const step of SEQUENCE_STEP_TABS) {
+      counts[step.id] = getTasksForStep(engagementTasks, step.day_number, today).length
+    }
+    return counts
+  }, [engagementTasks, today])
+
+  const currentStep = SEQUENCE_STEP_TABS.find((s) => s.id === stepTab)!
+
+  const dueTasks = useMemo(
+    () => getTasksForStep(engagementTasks, currentStep.day_number, today),
+    [engagementTasks, currentStep.day_number, today],
   )
-
-  const emailPageCount = Math.max(1, Math.ceil(emailTasks.length / EMAIL_PAGE_SIZE))
-
-  const paginatedEmailTasks = useMemo(() => {
-    const start = (emailPage - 1) * EMAIL_PAGE_SIZE
-    return emailTasks.slice(start, start + EMAIL_PAGE_SIZE)
-  }, [emailTasks, emailPage])
 
   useEffect(() => {
-    if (emailPage > emailPageCount) setEmailPage(emailPageCount)
-  }, [emailPage, emailPageCount])
+    setPage(1)
+    setSelectedIds(new Set())
+    setExpandedTaskId(null)
+  }, [stepTab, search])
 
   function getLead(task: SequenceTask): Lead | undefined {
-    return crm.leads.find((item) => item.id === task.lead_id)
+    return crm.leads.find((l) => l.id === task.lead_id)
   }
 
-  function isEmailReady(task: SequenceTask) {
+  function emailReady(task: SequenceTask) {
     const lead = getLead(task)
     return Boolean(lead?.email && task.generated_subject && task.generated_body)
   }
 
-  function toggleEmailSelection(id: string) {
-    setSelectedEmailIds((prev) => {
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -121,21 +128,9 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     })
   }
 
-  function toggleSelectPageEmails() {
-    const pageIds = paginatedEmailTasks.map((task) => task.id)
-    const allSelected = pageIds.every((id) => selectedEmailIds.has(id))
-    setSelectedEmailIds((prev) => {
-      const next = new Set(prev)
-      if (allSelected) pageIds.forEach((id) => next.delete(id))
-      else pageIds.forEach((id) => next.add(id))
-      return next
-    })
-  }
-
   async function generateDraft(task: SequenceTask) {
     const lead = getLead(task)
     if (!lead) return
-
     setGeneratingTaskId(task.id)
     setMessage(null)
     try {
@@ -147,7 +142,7 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
       })
       setMessage('Draft generated.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Draft generation failed.')
+      setMessage(error instanceof Error ? error.message : 'Draft failed.')
     } finally {
       setGeneratingTaskId(null)
     }
@@ -156,12 +151,10 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   async function sendEmail(task: SequenceTask) {
     const lead = getLead(task)
     if (!lead?.email) {
-      setMessage('Lead does not have an email address.')
+      setMessage('Lead has no email.')
       return
     }
-
     setBusyTask(task.id)
-    setMessage(null)
     try {
       const data = await requestSendEmail(
         lead.email,
@@ -179,669 +172,599 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
       if (!lead.email_engagement || lead.email_engagement === 'none') {
         await crm.updateLead(lead.id, { email_engagement: 'sent' })
       }
-      setSelectedEmailIds((prev) => {
-        const next = new Set(prev)
-        next.delete(task.id)
-        return next
-      })
-      if (expandedTaskId === task.id) setExpandedTaskId(null)
-      setMessage('Email sent.')
+      setExpandedTaskId(null)
+      setMessage(`Sent to ${lead.name}.`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Email send failed.')
+      setMessage(error instanceof Error ? error.message : 'Send failed.')
     } finally {
       setBusyTask(null)
     }
   }
 
-  async function bulkGenerateEmails() {
-    const targets = emailTasks.filter((task) => selectedEmailIds.has(task.id))
-    if (!targets.length) return
+  async function markDone(task: SequenceTask) {
+    setBusyTask(task.id)
+    try {
+      await crm.updateSequenceTask(task.id, {
+        status: 'done',
+        completed_at: new Date().toISOString(),
+      })
+      setMessage(`${task.title} marked done.`)
+    } finally {
+      setBusyTask(null)
+    }
+  }
 
+  async function bulkGenerate() {
+    const targets = dueTasks.filter((t) => selectedIds.has(t.id))
+    if (!targets.length) return
     setBulkBusy(true)
-    setMessage(null)
     let done = 0
     try {
       for (const task of targets) {
-        const lead = getLead(task)
-        if (!lead) continue
         setGeneratingTaskId(task.id)
-        setMessage(`Generating drafts… ${done + 1} of ${targets.length}`)
-        const data = await requestProspectingDraft(lead, task)
-        await crm.updateSequenceTask(task.id, {
-          generated_subject: data.subject ?? '',
-          generated_body: data.body ?? '',
-          generated_script: data.script ?? '',
-        })
+        await generateDraft(task)
         done += 1
       }
       setMessage(`Generated ${done} draft${done === 1 ? '' : 's'}.`)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Bulk generate failed.')
     } finally {
       setGeneratingTaskId(null)
       setBulkBusy(false)
     }
   }
 
-  async function bulkSendEmails() {
-    const targets = emailTasks.filter(
-      (task) => selectedEmailIds.has(task.id) && isEmailReady(task),
-    )
+  async function bulkSend() {
+    const targets = dueTasks.filter((t) => selectedIds.has(t.id) && emailReady(t))
     if (!targets.length) {
-      setMessage('Select emails with drafts and valid addresses to send.')
+      setMessage('Select leads with ready drafts.')
       return
     }
-
     setBulkBusy(true)
-    setMessage(null)
     let sent = 0
-    let failed = 0
     try {
       for (const task of targets) {
-        const lead = getLead(task)
-        if (!lead?.email) continue
-        setMessage(`Sending emails… ${sent + failed + 1} of ${targets.length}`)
-        try {
-          const data = await requestSendEmail(
-            lead.email,
-            task.generated_subject,
-            task.generated_body,
-            lead.id,
-            task.id,
-          )
-          await crm.updateSequenceTask(task.id, {
-            status: 'sent',
-            resend_email_id: data.id ?? '',
-            sent_at: new Date().toISOString(),
-            completed_at: new Date().toISOString(),
-          })
-          if (!lead.email_engagement || lead.email_engagement === 'none') {
-            await crm.updateLead(lead.id, { email_engagement: 'sent' })
-          }
-          sent += 1
-        } catch {
-          failed += 1
-        }
+        await sendEmail(task)
+        sent += 1
       }
-      setSelectedEmailIds(new Set())
-      setExpandedTaskId(null)
-      setMessage(
-        failed > 0
-          ? `Sent ${sent} email${sent === 1 ? '' : 's'}, ${failed} failed.`
-          : `Sent ${sent} email${sent === 1 ? '' : 's'}.`,
-      )
+      setSelectedIds(new Set())
+      setMessage(`Sent ${sent} email${sent === 1 ? '' : 's'}.`)
     } finally {
       setBulkBusy(false)
     }
   }
 
-  async function markDone(task: SequenceTask) {
-    await crm.updateSequenceTask(task.id, {
-      status: 'done',
-      completed_at: new Date().toISOString(),
-    })
-  }
-
-  const selectedReadyCount = emailTasks.filter(
-    (task) => selectedEmailIds.has(task.id) && isEmailReady(task),
-  ).length
-
-  const pageAllSelected = paginatedEmailTasks.length > 0
-    && paginatedEmailTasks.every((task) => selectedEmailIds.has(task.id))
-
-  const tabCounts: Record<ProspectingTab, number> = {
-    email: emailTasks.length,
-    linkedin: linkedinTasks.length,
-    phone: phoneTasks.length,
-    upcoming: upcoming.length,
-  }
+  const selectedReady = dueTasks.filter((t) => selectedIds.has(t.id) && emailReady(t)).length
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Email 1 goes out first. Opens unlock Email 2; opens on Email 2 unlock LinkedIn and add the lead to Warm/Contacts. Phone unlocks after LinkedIn is done; Close Loop unlocks after phone is done.
+          Work one step at a time — finish Email 1, then Email 2, LinkedIn, Call, and Close.
         </p>
         {message && (
-          <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
-            {message}
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">{message}</p>
         )}
       </div>
 
-      <Tabs defaultValue="email" className="w-full">
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 p-1">
-          <TabsTrigger value="email" className="gap-2">
-            <Mail className="h-3.5 w-3.5" />
-            Email due
-            <TabCount count={tabCounts.email} />
-          </TabsTrigger>
-          <TabsTrigger value="linkedin" className="gap-2">
-            <Linkedin className="h-3.5 w-3.5" />
-            LinkedIn due
-            <TabCount count={tabCounts.linkedin} />
-          </TabsTrigger>
-          <TabsTrigger value="phone" className="gap-2">
-            <Phone className="h-3.5 w-3.5" />
-            Phone due
-            <TabCount count={tabCounts.phone} />
-          </TabsTrigger>
-          <TabsTrigger value="upcoming" className="gap-2">
-            <CalendarClock className="h-3.5 w-3.5" />
-            Upcoming
-            <TabCount count={tabCounts.upcoming} />
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="email">
-          <Card>
-            <CardContent className="pt-6">
-              {emailTasks.length > 0 && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    {emailTasks.length} email{emailTasks.length === 1 ? '' : 's'} due today
-                    {selectedEmailIds.size > 0 && ` · ${selectedEmailIds.size} selected`}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      onClick={bulkGenerateEmails}
-                      variant="outline"
-                      size="sm"
-                      disabled={bulkBusy || selectedEmailIds.size === 0}
-                    >
-                      {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      Generate selected ({selectedEmailIds.size})
-                    </Button>
-                    <Button
-                      onClick={bulkSendEmails}
-                      size="sm"
-                      disabled={bulkBusy || selectedReadyCount === 0}
-                    >
-                      {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                      Send selected ({selectedReadyCount})
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {emailTasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No email tasks due.</p>
-              ) : (
-                <>
-                  <div className="overflow-hidden rounded-lg border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-10">
-                            <input
-                              type="checkbox"
-                              checked={pageAllSelected}
-                              onChange={toggleSelectPageEmails}
-                              aria-label="Select all on this page"
-                            />
-                          </TableHead>
-                          <TableHead>Lead</TableHead>
-                          <TableHead>Step</TableHead>
-                          <TableHead>Subject</TableHead>
-                          <TableHead className="w-24">Status</TableHead>
-                          <TableHead className="w-28 text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {paginatedEmailTasks.map((task) => {
-                          const lead = getLead(task)
-                          const ready = isEmailReady(task)
-                          const expanded = expandedTaskId === task.id
-                          return (
-                            <Fragment key={task.id}>
-                              <TableRow className={cn(expanded && 'border-b-0 bg-muted/30')}>
-                                <TableCell>
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedEmailIds.has(task.id)}
-                                    onChange={() => toggleEmailSelection(task.id)}
-                                    aria-label={`Select ${lead?.name ?? 'lead'}`}
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {lead?.company_name || 'No company'} · Day {task.day_number}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-sm">{task.title}</TableCell>
-                                <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
-                                  {task.generated_subject || 'No draft yet'}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge className={ready ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
-                                    {ready ? 'Ready' : 'Draft'}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="flex justify-end gap-1">
-                                    <Button
-                                      onClick={() => setExpandedTaskId(expanded ? null : task.id)}
-                                      variant="ghost"
-                                      size="icon"
-                                      title={expanded ? 'Collapse' : 'Preview'}
-                                    >
-                                      {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                                    </Button>
-                                    <Button
-                                      onClick={() => sendEmail(task)}
-                                      variant="ghost"
-                                      size="icon"
-                                      disabled={busyTask === task.id || bulkBusy || !ready}
-                                      title="Send email"
-                                    >
-                                      <Send className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                              {expanded && (
-                                <TableRow className="bg-muted/20 hover:bg-muted/20">
-                                  <TableCell colSpan={6} className="p-0">
-                                    <div className="prospecting-expand border-t bg-muted/20 px-4 py-4">
-                                      <EmailPreviewPanel
-                                        task={task}
-                                        lead={lead}
-                                        busy={busyTask === task.id || bulkBusy}
-                                        generating={generatingTaskId === task.id}
-                                        onGenerate={() => generateDraft(task)}
-                                        onSend={() => sendEmail(task)}
-                                      />
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              )}
-                            </Fragment>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {emailPageCount > 1 && (
-                    <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
-                      <p className="text-xs text-muted-foreground">
-                        Showing {(emailPage - 1) * EMAIL_PAGE_SIZE + 1}–{Math.min(emailPage * EMAIL_PAGE_SIZE, emailTasks.length)} of {emailTasks.length}
-                      </p>
-                      <Pagination>
-                        <PaginationContent>
-                          <PaginationItem>
-                            <PaginationPrevious
-                              onClick={() => setEmailPage((p) => Math.max(1, p - 1))}
-                              disabled={emailPage === 1}
-                            />
-                          </PaginationItem>
-                          {getPageNumbers(emailPage, emailPageCount).map((page, i) => (
-                            <PaginationItem key={`${page}-${i}`}>
-                              {page === 'ellipsis' ? (
-                                <PaginationEllipsis />
-                              ) : (
-                                <PaginationLink
-                                  isActive={page === emailPage}
-                                  onClick={() => setEmailPage(page)}
-                                >
-                                  {page}
-                                </PaginationLink>
-                              )}
-                            </PaginationItem>
-                          ))}
-                          <PaginationItem>
-                            <PaginationNext
-                              onClick={() => setEmailPage((p) => Math.min(emailPageCount, p + 1))}
-                              disabled={emailPage === emailPageCount}
-                            />
-                          </PaginationItem>
-                        </PaginationContent>
-                      </Pagination>
-                    </div>
-                  )}
-
-                </>
-              )}
-
-              {recentlySentEmails.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="mb-3 text-sm font-semibold">Sent recently</h3>
-                  <p className="mb-3 text-xs text-muted-foreground">
-                    Engagement updates live when prospects open or click your emails.
-                  </p>
-                  <div className="overflow-hidden rounded-lg border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Lead</TableHead>
-                          <TableHead>Step</TableHead>
-                          <TableHead>Subject</TableHead>
-                          <TableHead>Sent</TableHead>
-                          <TableHead>Engagement</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {recentlySentEmails.slice(0, 20).map((task) => {
-                          const lead = getLead(task)
-                          return (
-                            <TableRow key={task.id}>
-                              <TableCell>
-                                <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {lead?.company_name || 'No company'} · Day {task.day_number}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm">{task.title}</TableCell>
-                              <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
-                                {task.generated_subject}
-                              </TableCell>
-                              <TableCell className="text-xs text-muted-foreground">
-                                {task.sent_at ? formatDate(task.sent_at) : '—'}
-                              </TableCell>
-                              <TableCell>
-                                <EngagementBadge variant="task" task={task} />
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {(['linkedin', 'phone'] as const).map((channel) => {
-          const tasks = channel === 'linkedin' ? linkedinTasks : phoneTasks
+      {/* Flow steps */}
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-muted/30 p-2">
+        {SEQUENCE_STEP_TABS.map((step, i) => {
+          const Icon = STEP_ICONS[step.id]
+          const active = stepTab === step.id
+          const count = stepCounts[step.id]
           return (
-            <TabsContent key={channel} value={channel}>
-              <Card>
-                <CardContent className="pt-6">
-                  {tasks.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No {CHANNEL_LABEL[channel].toLowerCase()} tasks due.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {tasks.map((task) => (
-                        <ManualTaskRow
-                          key={task.id}
-                          task={task}
-                          lead={getLead(task)}
-                          expanded={expandedTaskId === task.id}
-                          busy={busyTask === task.id || generatingTaskId === task.id}
-                          generating={generatingTaskId === task.id}
-                          onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                          onGenerate={() => generateDraft(task)}
-                          onDone={() => markDone(task)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+            <Fragment key={step.id}>
+              <button
+                type="button"
+                onClick={() => setStepTab(step.id)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-background hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {step.label}
+                {count > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                      active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-primary/15 text-primary',
+                    )}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+              {i < SEQUENCE_STEP_TABS.length - 1 && (
+                <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
+              )}
+            </Fragment>
           )
         })}
+      </div>
 
-        <TabsContent value="upcoming">
-          <Card>
-            <CardContent className="pt-6">
-              <UpcomingSchedule tasks={upcoming} getLead={getLead} today={today} />
-            </CardContent>
-          </Card>
-        </TabsContent>
+      <Tabs value={stepTab} onValueChange={(v) => setStepTab(v as SequenceStepTabId)}>
+        <TabsList className="sr-only">
+          {SEQUENCE_STEP_TABS.map((s) => (
+            <TabsTrigger key={s.id} value={s.id}>{s.label}</TabsTrigger>
+          ))}
+          <TabsTrigger value="tracking">Tracking</TabsTrigger>
+        </TabsList>
+
+        {SEQUENCE_STEP_TABS.map((step) => {
+          const stepDueAll = getTasksForStep(engagementTasks, step.day_number, today)
+          const stepDueFiltered = search.trim()
+            ? stepDueAll.filter((task) => {
+                const lead = crm.leads.find((l) => l.id === task.lead_id)
+                if (!lead) return false
+                const q = search.trim().toLowerCase()
+                return lead.name.toLowerCase().includes(q)
+                  || (lead.company_name ?? '').toLowerCase().includes(q)
+              })
+            : stepDueAll
+          const stepPageCount = Math.max(1, Math.ceil(stepDueFiltered.length / PAGE_SIZE))
+          const stepPaginated = stepTab === step.id
+            ? stepDueFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+            : stepDueFiltered.slice(0, PAGE_SIZE)
+          const stepWaiting =
+            step.id === 'email1' || step.id === 'email2'
+              ? getWaitingForOpenTasks(engagementTasks, step.day_number)
+              : []
+
+          return (
+          <TabsContent key={step.id} value={step.id} className="mt-0 space-y-4">
+            <StepPanel
+              stepLabel={step.label}
+              purpose={ENGAGEMENT_GATED_SEQUENCE.find((s) => s.day_number === step.day_number)?.purpose ?? ''}
+              dueCount={stepCounts[step.id]}
+              search={search}
+              onSearchChange={setSearch}
+              isEmailStep={step.channel === 'email'}
+              isManualStep={step.id === 'linkedin' || step.id === 'call'}
+              dueTasks={stepPaginated}
+              totalDue={stepDueFiltered.length}
+              waitingTasks={stepWaiting}
+              page={page}
+              pageCount={stepPageCount}
+              onPageChange={setPage}
+              selectedIds={selectedIds}
+              selectedReady={stepDueFiltered.filter((t) => selectedIds.has(t.id) && emailReady(t)).length}
+              bulkBusy={bulkBusy}
+              onBulkGenerate={bulkGenerate}
+              onBulkSend={bulkSend}
+              expandedTaskId={expandedTaskId}
+              busyTask={busyTask}
+              generatingTaskId={generatingTaskId}
+              getLead={getLead}
+              emailReady={emailReady}
+              onToggleSelect={toggleSelect}
+              onExpand={setExpandedTaskId}
+              onGenerate={generateDraft}
+              onSend={sendEmail}
+              onDone={markDone}
+            />
+          </TabsContent>
+          )
+        })}
       </Tabs>
+
+      {recentlySent.length > 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <h3 className="mb-1 text-sm font-semibold">Sent &amp; tracking</h3>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Open and click status for emails you&apos;ve sent.
+            </p>
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lead</TableHead>
+                    <TableHead>Step</TableHead>
+                    <TableHead>Sent</TableHead>
+                    <TableHead>Engagement</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentlySent.slice(0, 15).map((task) => {
+                    const lead = getLead(task)
+                    return (
+                      <TableRow key={task.id}>
+                        <TableCell className="font-medium">{lead?.name ?? '—'}</TableCell>
+                        <TableCell className="text-sm">{task.title}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {task.sent_at ? formatDate(task.sent_at) : '—'}
+                        </TableCell>
+                        <TableCell>
+                          <EngagementBadge variant="task" task={task} />
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
 
-function UpcomingSchedule({
-  tasks,
+function StepPanel({
+  stepLabel,
+  purpose,
+  dueCount,
+  search,
+  onSearchChange,
+  isEmailStep,
+  isManualStep,
+  dueTasks,
+  totalDue,
+  waitingTasks,
+  page,
+  pageCount,
+  onPageChange,
+  selectedIds,
+  selectedReady,
+  bulkBusy,
+  onBulkGenerate,
+  onBulkSend,
+  expandedTaskId,
+  busyTask,
+  generatingTaskId,
   getLead,
-  today,
-}: {
-  tasks: SequenceTask[]
-  getLead: (task: SequenceTask) => Lead | undefined
-  today: string
-}) {
-  const byDate = useMemo(() => {
-    const groups = new Map<string, SequenceTask[]>()
-    for (const task of tasks) {
-      const list = groups.get(task.due_date) ?? []
-      list.push(task)
-      groups.set(task.due_date, list)
-    }
-    return Array.from(groups.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, dayTasks]) => [
-        date,
-        dayTasks.sort((a, b) => a.lead_id.localeCompare(b.lead_id) || a.day_number - b.day_number),
-      ] as const)
-  }, [tasks])
-
-  if (tasks.length === 0) {
-    return <p className="text-sm text-muted-foreground">No upcoming sequence tasks.</p>
-  }
-
-  return (
-    <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Scheduled follow-ups from enrolled leads. When each date arrives, tasks move to the
-        {' '}<strong className="font-medium text-foreground">Email</strong>,{' '}
-        <strong className="font-medium text-foreground">LinkedIn</strong>, or{' '}
-        <strong className="font-medium text-foreground">Phone</strong> tab to work on.
-      </p>
-
-      {byDate.map(([date, dayTasks]) => (
-        <section key={date}>
-          <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h3 className="text-sm font-semibold">{formatUpcomingDate(date)}</h3>
-            <span className="text-xs text-muted-foreground">
-              {formatDueRelative(date, today)} · {dayTasks.length} task{dayTasks.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          <div className="overflow-hidden rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Sequence step</TableHead>
-                  <TableHead>Channel</TableHead>
-                  <TableHead className="min-w-[6.75rem]">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dayTasks.map((task) => {
-                  const lead = getLead(task)
-                  const Icon = CHANNEL_ICON[task.channel]
-                  return (
-                    <TableRow key={task.id}>
-                      <TableCell>
-                        <div className="font-medium">{lead?.name ?? 'Unknown lead'}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {lead?.company_name || 'No company'}
-                          {lead?.title ? ` · ${lead.title}` : ''}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">Day {task.day_number} · {task.title}</div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">{task.purpose}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5 text-sm capitalize">
-                          <Icon className="h-3.5 w-3.5 text-primary" />
-                          {CHANNEL_LABEL[task.channel]}
-                        </div>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        <Badge
-                          className={cn(
-                            'whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium',
-                            task.trigger_type === 'automatic'
-                              ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200/80'
-                              : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200/80',
-                          )}
-                        >
-                          {task.trigger_type === 'automatic' ? 'Auto-send' : 'Manual'}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </section>
-      ))}
-    </div>
-  )
-}
-
-function formatUpcomingDate(date: string) {
-  try {
-    return format(new Date(`${date}T00:00:00`), 'EEEE, MMM d, yyyy')
-  } catch {
-    return formatDate(date)
-  }
-}
-
-function formatDueRelative(date: string, today: string) {
-  const due = new Date(`${date}T00:00:00`)
-  const now = new Date(`${today}T00:00:00`)
-  const days = Math.round((due.getTime() - now.getTime()) / 86_400_000)
-  if (days === 1) return 'Tomorrow'
-  if (days > 1) return `In ${days} days`
-  return formatDate(date)
-}
-
-function TabCount({ count }: { count: number }) {
-  if (count === 0) return null
-  return (
-    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-      {count}
-    </span>
-  )
-}
-
-function EmailPreviewPanel({
-  task,
-  lead,
-  busy,
-  generating,
+  emailReady,
+  onToggleSelect,
+  onExpand,
   onGenerate,
   onSend,
+  onDone,
 }: {
-  task: SequenceTask
-  lead?: Lead
-  busy: boolean
-  generating: boolean
-  onGenerate: () => void
-  onSend: () => void
+  stepLabel: string
+  purpose: string
+  dueCount: number
+  search: string
+  onSearchChange: (v: string) => void
+  isEmailStep: boolean
+  isManualStep: boolean
+  dueTasks: SequenceTask[]
+  totalDue: number
+  waitingTasks: SequenceTask[]
+  page: number
+  pageCount: number
+  onPageChange: (p: number) => void
+  selectedIds: Set<string>
+  selectedReady: number
+  bulkBusy: boolean
+  onBulkGenerate: () => void
+  onBulkSend: () => void
+  expandedTaskId: string | null
+  busyTask: string | null
+  generatingTaskId: string | null
+  getLead: (task: SequenceTask) => Lead | undefined
+  emailReady: (task: SequenceTask) => boolean
+  onToggleSelect: (id: string) => void
+  onExpand: (id: string | null) => void
+  onGenerate: (task: SequenceTask) => void
+  onSend: (task: SequenceTask) => void
+  onDone: (task: SequenceTask) => void
 }) {
-  const ready = Boolean(lead?.email && task.generated_subject && task.generated_body)
+  const pageAllSelected = dueTasks.length > 0 && dueTasks.every((t) => selectedIds.has(t.id))
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
+    <Card>
+      <CardContent className="space-y-4 pt-6">
         <div>
-          <div className="font-medium">{lead?.name ?? 'Unknown lead'}</div>
-          <div className="text-xs text-muted-foreground">{task.title} · {task.purpose}</div>
+          <h2 className="text-lg font-semibold">{stepLabel}</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">{purpose}</p>
         </div>
-        <Badge className={task.trigger_type === 'automatic' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}>
-          {task.trigger_type}
-        </Badge>
-      </div>
-      {task.generated_subject && (
-        <div className="mt-3 rounded-lg bg-background p-3 text-sm">
-          <div className="mb-1 text-xs font-medium text-muted-foreground">Subject</div>
-          {task.generated_subject}
+
+        <div className="relative max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search leads…"
+            className="h-9 pl-8"
+          />
         </div>
-      )}
-      {task.generated_body && (
-        <pre className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-sm font-sans leading-relaxed">
-          {task.generated_body}
-        </pre>
-      )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button onClick={onGenerate} variant="outline" size="sm" disabled={busy}>
-          {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {generating
-            ? (task.generated_body ? 'Regenerating…' : 'Generating…')
-            : (task.generated_body ? 'Regenerate' : 'Generate')}
-        </Button>
-        <Button onClick={onSend} size="sm" disabled={busy || !ready}>
-          {busy && !generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-          {busy && !generating ? 'Sending…' : 'Send email'}
-        </Button>
-      </div>
-    </div>
+
+        {isEmailStep && dueCount > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={bulkBusy || selectedIds.size === 0}
+              onClick={onBulkGenerate}
+            >
+              {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              Generate ({selectedIds.size})
+            </Button>
+            <Button size="sm" disabled={bulkBusy || selectedReady === 0} onClick={onBulkSend}>
+              {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Send ({selectedReady})
+            </Button>
+          </div>
+        )}
+
+        {totalDue === 0 ? (
+          <div className="rounded-lg border border-dashed py-10 text-center">
+            <p className="font-medium">No {stepLabel.toLowerCase()} tasks due</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {waitingTasks.length > 0
+                ? 'Leads below are waiting for opens to unlock the next step.'
+                : 'Complete the previous step or enroll more leads from the Leads page.'}
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              <strong className="font-medium text-foreground">{totalDue}</strong> lead{totalDue === 1 ? '' : 's'} ready for {stepLabel}
+            </p>
+            <div className="overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {isEmailStep && (
+                      <TableHead className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={pageAllSelected}
+                          onChange={() => {
+                            dueTasks.forEach((t) => {
+                              if (pageAllSelected) {
+                                if (selectedIds.has(t.id)) onToggleSelect(t.id)
+                              } else if (!selectedIds.has(t.id)) {
+                                onToggleSelect(t.id)
+                              }
+                            })
+                          }}
+                          aria-label="Select all"
+                        />
+                      </TableHead>
+                    )}
+                    <TableHead>Lead</TableHead>
+                    {isEmailStep && <TableHead>Subject</TableHead>}
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dueTasks.map((task) => {
+                    const lead = getLead(task)
+                    const ready = emailReady(task)
+                    const expanded = expandedTaskId === task.id
+                    return (
+                      <Fragment key={task.id}>
+                        <TableRow className={cn(expanded && 'border-b-0 bg-muted/30')}>
+                          {isEmailStep && (
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(task.id)}
+                                onChange={() => onToggleSelect(task.id)}
+                              />
+                            </TableCell>
+                          )}
+                          <TableCell>
+                            <div className="font-medium">{lead?.name ?? 'Unknown'}</div>
+                            <div className="text-xs text-muted-foreground">{lead?.company_name || '—'}</div>
+                          </TableCell>
+                          {isEmailStep && (
+                            <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
+                              {task.generated_subject || 'No draft'}
+                            </TableCell>
+                          )}
+                          <TableCell>
+                            {isEmailStep ? (
+                              <Badge className={ready ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}>
+                                {ready ? 'Ready' : 'Needs draft'}
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-primary/10 text-primary">Due</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => onExpand(expanded ? null : task.id)}
+                              >
+                                {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              </Button>
+                              {isEmailStep && (
+                                <Button
+                                  size="sm"
+                                  disabled={busyTask === task.id || !ready}
+                                  onClick={() => onSend(task)}
+                                >
+                                  <Send className="h-3.5 w-3.5" />
+                                  Send
+                                </Button>
+                              )}
+                              {isManualStep && (
+                                <Button size="sm" disabled={busyTask === task.id} onClick={() => onDone(task)}>
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  Done
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {expanded && (
+                          <TableRow>
+                            <TableCell colSpan={isEmailStep ? 5 : 4} className="bg-muted/20 p-4">
+                              <TaskExpand
+                                task={task}
+                                lead={lead}
+                                isEmail={isEmailStep}
+                                busy={busyTask === task.id}
+                                generating={generatingTaskId === task.id}
+                                ready={ready}
+                                onGenerate={() => onGenerate(task)}
+                                onSend={() => onSend(task)}
+                                onDone={() => onDone(task)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            {pageCount > 1 && (
+              <PaginationBar page={page} pageCount={pageCount} total={totalDue} onPageChange={onPageChange} />
+            )}
+          </>
+        )}
+
+        {waitingTasks.length > 0 && (
+          <div className="mt-6">
+            <h3 className="mb-2 text-sm font-semibold">Waiting for open ({waitingTasks.length})</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Sent — waiting for the prospect to open before the next step unlocks.
+            </p>
+            <div className="space-y-2">
+              {waitingTasks.map((task) => {
+                const lead = getLead(task)
+                return (
+                  <div
+                    key={task.id}
+                    className="flex items-center justify-between rounded-lg border bg-amber-50/50 px-3 py-2"
+                  >
+                    <div>
+                      <div className="text-sm font-medium">{lead?.name}</div>
+                      <div className="text-xs text-muted-foreground">{task.generated_subject}</div>
+                    </div>
+                    <EngagementBadge variant="task" task={task} />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
-function ManualTaskRow({
+function TaskExpand({
   task,
   lead,
-  expanded,
+  isEmail,
   busy,
   generating,
-  onToggle,
+  ready,
   onGenerate,
+  onSend,
   onDone,
 }: {
   task: SequenceTask
   lead?: Lead
-  expanded: boolean
+  isEmail: boolean
   busy: boolean
   generating: boolean
-  onToggle: () => void
+  ready: boolean
   onGenerate: () => void
+  onSend: () => void
   onDone: () => void
 }) {
-  return (
-    <div className="rounded-lg border">
-      <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-        <div className="min-w-0">
-          <div className="truncate font-medium text-sm">{lead?.name ?? 'Unknown lead'}</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {task.title} · Day {task.day_number}
+  if (isEmail) {
+    return (
+      <div className="space-y-3">
+        {task.generated_subject && (
+          <div>
+            <div className="text-xs font-medium text-muted-foreground">Subject</div>
+            <div className="text-sm">{task.generated_subject}</div>
           </div>
-        </div>
-        <div className="flex flex-shrink-0 gap-1">
-          <Button onClick={onToggle} variant="ghost" size="icon">
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        )}
+        {task.generated_body && (
+          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border bg-background p-3 text-sm">
+            {task.generated_body}
+          </pre>
+        )}
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={busy} onClick={onGenerate}>
+            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {task.generated_body ? 'Regenerate' : 'Generate'}
           </Button>
-          <Button onClick={onDone} size="sm" disabled={busy}>
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Done
+          <Button size="sm" disabled={busy || !ready} onClick={onSend}>
+            <Send className="h-3.5 w-3.5" />
+            Send
           </Button>
         </div>
       </div>
-      {expanded && (
-        <div className="border-t bg-muted/20 px-3 py-3">
-          <p className="text-xs text-muted-foreground">{task.purpose}</p>
-          {task.generated_script ? (
-            <pre className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap text-sm font-sans leading-relaxed">
-              {task.generated_script}
-            </pre>
-          ) : (
-            <p className="mt-2 text-sm text-muted-foreground">No script generated yet.</p>
-          )}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {task.channel === 'linkedin' && lead && <LinkedInButton lead={lead} />}
-            <Button onClick={onGenerate} variant="outline" size="sm" disabled={busy}>
-            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {generating
-              ? (task.generated_script ? 'Regenerating…' : 'Generating…')
-              : (task.generated_script ? 'Regenerate' : 'Generate')}
-            </Button>
-          </div>
-        </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">{task.purpose}</p>
+      {task.generated_script ? (
+        <pre className="max-h-36 overflow-y-auto whitespace-pre-wrap rounded-md border bg-background p-3 text-sm">
+          {task.generated_script}
+        </pre>
+      ) : (
+        <p className="text-sm text-muted-foreground">No script yet.</p>
       )}
+      <div className="flex flex-wrap gap-2">
+        {task.channel === 'linkedin' && lead && <LinkedInButton lead={lead} />}
+        <Button variant="outline" size="sm" disabled={busy} onClick={onGenerate}>
+          {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          Generate script
+        </Button>
+        <Button size="sm" disabled={busy} onClick={onDone}>
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Mark done
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function PaginationBar({
+  page,
+  pageCount,
+  total,
+  onPageChange,
+}: {
+  page: number
+  pageCount: number
+  total: number
+  onPageChange: (p: number) => void
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <p className="text-xs text-muted-foreground">
+        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
+      </p>
+      <Pagination>
+        <PaginationContent>
+          <PaginationItem>
+            <PaginationPrevious onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1} />
+          </PaginationItem>
+          {getPageNumbers(page, pageCount).map((p, i) => (
+            <PaginationItem key={`${p}-${i}`}>
+              {p === 'ellipsis' ? (
+                <PaginationEllipsis />
+              ) : (
+                <PaginationLink isActive={p === page} onClick={() => onPageChange(p)}>
+                  {p}
+                </PaginationLink>
+              )}
+            </PaginationItem>
+          ))}
+          <PaginationItem>
+            <PaginationNext onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page === pageCount} />
+          </PaginationItem>
+        </PaginationContent>
+      </Pagination>
     </div>
   )
 }

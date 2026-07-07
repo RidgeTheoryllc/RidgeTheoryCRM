@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Company, Contact, Lead } from '@/types'
+import { autoSendSequenceTask } from '@/lib/autoSendSequenceEmail'
 import {
   companyFromLead,
   contactFromLead,
@@ -138,6 +139,13 @@ export async function handleEngagementGate(
         .from('sequence_tasks')
         .update({ status: 'pending', due_date: today })
         .eq('id', email2.id)
+
+      const sendResult = await autoSendSequenceTask(supabase, email2.id)
+      if (sendResult.sent) {
+        console.info(`Auto-sent Email 2 for sequence ${task.sequence_id} (task ${email2.id})`)
+      } else if (sendResult.error) {
+        console.error(`Auto-send Email 2 failed for task ${email2.id}:`, sendResult.error)
+      }
     }
     return
   }

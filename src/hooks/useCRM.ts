@@ -333,6 +333,19 @@ export function useCRM(profile?: Profile | null) {
       return next
     })
 
+    const email1 = createdTasks.find((task) => task.day_number === 1 && task.channel === 'email')
+    if (email1 && scoredLead.email?.trim() && scoredLead.email_valid !== false) {
+      try {
+        await fetch('/api/email/auto-send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sequence_task_id: email1.id }),
+        })
+      } catch (err) {
+        console.warn('Auto-send Email 1 failed:', err)
+      }
+    }
+
     await updateLead(id, { status: prospectingStatus, ...score })
     return sequence
   }, [leads, ownerId, prospectingSequences, updateLead])
