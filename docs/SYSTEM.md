@@ -308,6 +308,29 @@ When every task in a sequence reaches a terminal status (`sent`, `done`, or `ski
 
 ---
 
+## Feature Guide: Dialer (Call step)
+
+Ported from the `RidgeTheoryllc/Call_Number_Rotation` project. Opening **Prospecting → Call** registers a Twilio Voice device in the browser. Each row has a **Call** button; expanding a row shows the lead's call history, recordings, and notes. **Mark done** still triggers the close email; calling does not complete the task by itself.
+
+**Flow:** `POST /api/twilio/call` picks the best caller ID from the rep's pool → Twilio rings the rep's browser (`client:agent-{userId}`, auto-accepted) → `/api/twilio/voice` puts the rep in a conference and dials the lead → `/api/twilio/call-status` writes `call_logs` (result taken from the lead's leg) and re-scores the DID.
+
+**Caller ID rotation** (`src/lib/dialer/didEngine.ts`): `score = +50 local area code + answer_rate×0.5 − spam×0.3 − calls_today×0.2`. Daily warmup caps go 50 → 70 → 85 → 100 over the first four days. Spam score rises on unanswered calls; above 80 the number moves to cooldown, and above 95 it is retired.
+
+**Dialer page** (`/dialer`): manage the caller ID pool and view recent calls.
+
+**Setup:**
+
+1. Run `supabase/migrations/call-rotation.sql`.
+2. Set the Twilio variables in `.env.local.example`.
+3. Create a TwiML App with Voice URL `{TWILIO_WEBHOOK_BASE_URL}/api/twilio/voice`.
+4. Add your Twilio numbers on `/dialer`.
+
+Locally, Twilio needs a public tunnel (`ngrok http 3000`) as `TWILIO_WEBHOOK_BASE_URL`. Webhooks are verified with `X-Twilio-Signature`.
+
+**Not ported yet:** inbound callbacks to pool numbers, SMS, Connect Call (3-way), superadmin console, auto-dial.
+
+---
+
 ## Feature Guide: Companies and Contacts
 
 **Companies** — list, search, create, edit, delete. Tags supported. Deleting a company nullifies references on contacts, leads, and deals (does not cascade-delete them).

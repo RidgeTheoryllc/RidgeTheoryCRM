@@ -27,6 +27,10 @@ import { EngagementBadge } from '@/components/outreach/EngagementBadge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { LinkedInButton } from '@/components/ui/LinkedInButton'
+import { DialerProvider } from '@/components/dialer/DialerProvider'
+import { DialerBar } from '@/components/dialer/DialerBar'
+import { CallLeadButton, LastCallBadge, LeadCallHistory } from '@/components/dialer/CallStepParts'
+import { isSupabaseConfigured } from '@/lib/supabase'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -67,6 +71,8 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   const [message, setMessage] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  // Register the browser phone only once the rep opens the Call step, then keep it for the visit.
+  const [callStepOpened, setCallStepOpened] = useState(false)
 
   const today = useMemo(() => todayDateString(), [])
 
@@ -105,6 +111,10 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
     setSelectedIds(new Set())
     setExpandedTaskId(null)
   }, [stepTab, search])
+
+  useEffect(() => {
+    if (stepTab === 'call') setCallStepOpened(true)
+  }, [stepTab])
 
   function getLead(task: SequenceTask): Lead | undefined {
     return crm.leads.find((l) => l.id === task.lead_id)
@@ -239,130 +249,133 @@ export function Prospecting({ crm }: { crm: CRMStore }) {
   const selectedReady = dueTasks.filter((t) => selectedIds.has(t.id) && emailReady(t)).length
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Work one step at a time — finish Email 1, then Email 2, LinkedIn, Call, and Close.
-          </p>
-          {message && (
-            <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">{message}</p>
-          )}
+    <DialerProvider enabled={callStepOpened && isSupabaseConfigured}>
+      <div className="space-y-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Prospecting</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Work one step at a time — finish Email 1, then Email 2, LinkedIn, Call, and Close.
+            </p>
+            {message && (
+              <p className="mt-2 text-sm text-muted-foreground" aria-live="polite">{message}</p>
+            )}
+          </div>
+          <Link
+            href="/prospecting/history"
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <History className="h-3.5 w-3.5" />
+            History
+          </Link>
         </div>
-        <Link
-          href="/prospecting/history"
-          className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-        >
-          <History className="h-3.5 w-3.5" />
-          History
-        </Link>
-      </div>
 
-      {/* Flow steps */}
-      <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-muted/30 p-2">
-        {SEQUENCE_STEP_TABS.map((step, i) => {
-          const Icon = STEP_ICONS[step.id]
-          const active = stepTab === step.id
-          const count = stepCounts[step.id]
-          return (
-            <Fragment key={step.id}>
-              <button
-                type="button"
-                onClick={() => setStepTab(step.id)}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-background hover:text-foreground',
+        {/* Flow steps */}
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-muted/30 p-2">
+          {SEQUENCE_STEP_TABS.map((step, i) => {
+            const Icon = STEP_ICONS[step.id]
+            const active = stepTab === step.id
+            const count = stepCounts[step.id]
+            return (
+              <Fragment key={step.id}>
+                <button
+                  type="button"
+                  onClick={() => setStepTab(step.id)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    active
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-background hover:text-foreground',
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {step.label}
+                  {count > 0 && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                        active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-primary/15 text-primary',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+                {i < SEQUENCE_STEP_TABS.length - 1 && (
+                  <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
                 )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {step.label}
-                {count > 0 && (
-                  <span
-                    className={cn(
-                      'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-                      active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-primary/15 text-primary',
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-              {i < SEQUENCE_STEP_TABS.length - 1 && (
-                <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted-foreground sm:block" />
-              )}
-            </Fragment>
-          )
-        })}
+              </Fragment>
+            )
+          })}
+        </div>
+
+        <Tabs value={stepTab} onValueChange={(v) => setStepTab(v as SequenceStepTabId)}>
+          <TabsList className="sr-only">
+            {SEQUENCE_STEP_TABS.map((s) => (
+              <TabsTrigger key={s.id} value={s.id}>{s.label}</TabsTrigger>
+            ))}
+          </TabsList>
+
+          {SEQUENCE_STEP_TABS.map((step) => {
+            const stepDueAll = getTasksForStep(engagementTasks, step.day_number, today)
+            const stepDueFiltered = search.trim()
+              ? stepDueAll.filter((task) => {
+                  const lead = crm.leads.find((l) => l.id === task.lead_id)
+                  if (!lead) return false
+                  const q = search.trim().toLowerCase()
+                  return lead.name.toLowerCase().includes(q)
+                    || (lead.company_name ?? '').toLowerCase().includes(q)
+                })
+              : stepDueAll
+            const stepPageCount = Math.max(1, Math.ceil(stepDueFiltered.length / PAGE_SIZE))
+            const stepPaginated = stepTab === step.id
+              ? stepDueFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+              : stepDueFiltered.slice(0, PAGE_SIZE)
+            const stepWaiting =
+              step.id === 'email1' || step.id === 'email2'
+                ? getWaitingForOpenTasks(engagementTasks, step.day_number)
+                : []
+
+            return (
+            <TabsContent key={step.id} value={step.id} className="mt-0 space-y-4">
+              <StepPanel
+                stepLabel={step.label}
+                purpose={ENGAGEMENT_GATED_SEQUENCE.find((s) => s.day_number === step.day_number)?.purpose ?? ''}
+                dueCount={stepCounts[step.id]}
+                search={search}
+                onSearchChange={setSearch}
+                isEmailStep={step.channel === 'email'}
+                isManualStep={step.id === 'linkedin' || step.id === 'call'}
+                isCallStep={step.id === 'call'}
+                dueTasks={stepPaginated}
+                totalDue={stepDueFiltered.length}
+                waitingTasks={stepWaiting}
+                page={page}
+                pageCount={stepPageCount}
+                onPageChange={setPage}
+                selectedIds={selectedIds}
+                selectedReady={stepDueFiltered.filter((t) => selectedIds.has(t.id) && emailReady(t)).length}
+                bulkBusy={bulkBusy}
+                onBulkGenerate={bulkGenerate}
+                onBulkSend={bulkSend}
+                expandedTaskId={expandedTaskId}
+                busyTask={busyTask}
+                generatingTaskId={generatingTaskId}
+                isAutoSending={(taskId) => crm.autoSendingTaskIds.includes(taskId)}
+                getLead={getLead}
+                emailReady={emailReady}
+                onToggleSelect={toggleSelect}
+                onExpand={setExpandedTaskId}
+                onGenerate={generateDraft}
+                onSend={sendEmail}
+                onDone={markDone}
+              />
+            </TabsContent>
+            )
+          })}
+        </Tabs>
       </div>
-
-      <Tabs value={stepTab} onValueChange={(v) => setStepTab(v as SequenceStepTabId)}>
-        <TabsList className="sr-only">
-          {SEQUENCE_STEP_TABS.map((s) => (
-            <TabsTrigger key={s.id} value={s.id}>{s.label}</TabsTrigger>
-          ))}
-        </TabsList>
-
-        {SEQUENCE_STEP_TABS.map((step) => {
-          const stepDueAll = getTasksForStep(engagementTasks, step.day_number, today)
-          const stepDueFiltered = search.trim()
-            ? stepDueAll.filter((task) => {
-                const lead = crm.leads.find((l) => l.id === task.lead_id)
-                if (!lead) return false
-                const q = search.trim().toLowerCase()
-                return lead.name.toLowerCase().includes(q)
-                  || (lead.company_name ?? '').toLowerCase().includes(q)
-              })
-            : stepDueAll
-          const stepPageCount = Math.max(1, Math.ceil(stepDueFiltered.length / PAGE_SIZE))
-          const stepPaginated = stepTab === step.id
-            ? stepDueFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-            : stepDueFiltered.slice(0, PAGE_SIZE)
-          const stepWaiting =
-            step.id === 'email1' || step.id === 'email2'
-              ? getWaitingForOpenTasks(engagementTasks, step.day_number)
-              : []
-
-          return (
-          <TabsContent key={step.id} value={step.id} className="mt-0 space-y-4">
-            <StepPanel
-              stepLabel={step.label}
-              purpose={ENGAGEMENT_GATED_SEQUENCE.find((s) => s.day_number === step.day_number)?.purpose ?? ''}
-              dueCount={stepCounts[step.id]}
-              search={search}
-              onSearchChange={setSearch}
-              isEmailStep={step.channel === 'email'}
-              isManualStep={step.id === 'linkedin' || step.id === 'call'}
-              dueTasks={stepPaginated}
-              totalDue={stepDueFiltered.length}
-              waitingTasks={stepWaiting}
-              page={page}
-              pageCount={stepPageCount}
-              onPageChange={setPage}
-              selectedIds={selectedIds}
-              selectedReady={stepDueFiltered.filter((t) => selectedIds.has(t.id) && emailReady(t)).length}
-              bulkBusy={bulkBusy}
-              onBulkGenerate={bulkGenerate}
-              onBulkSend={bulkSend}
-              expandedTaskId={expandedTaskId}
-              busyTask={busyTask}
-              generatingTaskId={generatingTaskId}
-              isAutoSending={(taskId) => crm.autoSendingTaskIds.includes(taskId)}
-              getLead={getLead}
-              emailReady={emailReady}
-              onToggleSelect={toggleSelect}
-              onExpand={setExpandedTaskId}
-              onGenerate={generateDraft}
-              onSend={sendEmail}
-              onDone={markDone}
-            />
-          </TabsContent>
-          )
-        })}
-      </Tabs>
-    </div>
+    </DialerProvider>
   )
 }
 
@@ -374,6 +387,7 @@ function StepPanel({
   onSearchChange,
   isEmailStep,
   isManualStep,
+  isCallStep,
   dueTasks,
   totalDue,
   waitingTasks,
@@ -404,6 +418,7 @@ function StepPanel({
   onSearchChange: (v: string) => void
   isEmailStep: boolean
   isManualStep: boolean
+  isCallStep: boolean
   dueTasks: SequenceTask[]
   totalDue: number
   waitingTasks: SequenceTask[]
@@ -446,6 +461,16 @@ function StepPanel({
             className="h-9 pl-8"
           />
         </div>
+
+        {isCallStep && (
+          isSupabaseConfigured ? (
+            <DialerBar />
+          ) : (
+            <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              Calling needs Supabase sign-in. Configure Supabase to use the dialer.
+            </p>
+          )
+        )}
 
         {isEmailStep && dueCount > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -545,7 +570,10 @@ function StepPanel({
                                 {ready ? 'Ready' : 'Needs draft'}
                               </Badge>
                             ) : (
-                              <Badge className="bg-primary/10 text-primary">Due</Badge>
+                              <div className="flex flex-wrap gap-1">
+                                <Badge className="bg-primary/10 text-primary">Due</Badge>
+                                {isCallStep && isSupabaseConfigured && <LastCallBadge leadId={lead?.id} />}
+                              </div>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
@@ -571,6 +599,7 @@ function StepPanel({
                                   {autoSending ? 'Sending…' : 'Send'}
                                 </Button>
                               )}
+                              {isCallStep && isSupabaseConfigured && <CallLeadButton lead={lead} task={task} />}
                               {isManualStep && (
                                 <Button
                                   size="sm"
@@ -715,8 +744,10 @@ function TaskExpand({
       ) : (
         <p className="text-sm text-muted-foreground">No script yet.</p>
       )}
+      {task.channel === 'phone' && isSupabaseConfigured && <LeadCallHistory lead={lead} />}
       <div className="flex flex-wrap gap-2">
         {task.channel === 'linkedin' && lead && <LinkedInButton lead={lead} />}
+        {task.channel === 'phone' && isSupabaseConfigured && <CallLeadButton lead={lead} task={task} />}
         <Button variant="outline" size="sm" disabled={busy} onClick={onGenerate}>
           {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
           Generate script

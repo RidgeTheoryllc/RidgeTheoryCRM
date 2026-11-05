@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Building2, UserPlus, Users, KanbanSquare,
-  CheckSquare, Zap, Search, LogOut, ChevronUp, User, Send,
+  CheckSquare, Zap, Search, LogOut, ChevronUp, User, Send, Phone,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { AppRole } from '@/types'
@@ -14,6 +14,7 @@ export type Page =
   | 'leads'
   | 'prospecting'
   | 'prospecting-history'
+  | 'dialer'
   | 'companies'
   | 'contacts'
   | 'pipeline'
@@ -23,6 +24,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'leads', label: 'Leads', icon: UserPlus },
   { id: 'prospecting', label: 'Prospecting', icon: Send },
+  { id: 'dialer', label: 'Dialer', icon: Phone },
   { id: 'companies', label: 'Companies', icon: Building2 },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare },

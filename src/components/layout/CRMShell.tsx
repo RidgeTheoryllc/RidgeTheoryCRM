@@ -13,6 +13,7 @@ import { Contacts } from '@/views/Contacts'
 import { Pipeline } from '@/views/Pipeline'
 import { Prospecting } from '@/views/Prospecting'
 import { ProspectingHistory } from '@/views/ProspectingHistory'
+import { Dialer } from '@/views/Dialer'
 import { Tasks } from '@/views/Tasks'
 import {
   CompanyForm, ContactForm, DealForm, LeadForm, TaskForm,
@@ -27,6 +28,7 @@ const PAGE_LABELS: Record<Page, string> = {
   leads: 'Leads',
   prospecting: 'Prospecting',
   'prospecting-history': 'Sent & tracking',
+  dialer: 'Dialer',
   companies: 'Companies',
   contacts: 'Contacts',
   pipeline: 'Pipeline',
@@ -113,6 +115,7 @@ export function CRMShell({ page }: { page: Page }) {
           {page === 'leads' && <Leads crm={crm} onNew={(t) => setModal(t as ModalType)} />}
           {page === 'prospecting' && <Prospecting crm={crm} />}
           {page === 'prospecting-history' && <ProspectingHistory crm={crm} />}
+          {page === 'dialer' && <Dialer crm={crm} />}
           {page === 'companies' && <Companies crm={crm} onNew={(t) => setModal(t as ModalType)} />}
           {page === 'contacts' && <Contacts crm={crm} onNew={(t) => setModal(t as ModalType)} />}
           {page === 'pipeline' && <Pipeline crm={crm} onNew={(t) => setModal(t as ModalType)} />}
