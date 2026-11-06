@@ -1,5 +1,6 @@
 import type { LeadStatus } from '@/types'
 import { advanceLeadStatus } from '@/lib/leadStatus'
+import { authFetch } from '@/lib/authFetch'
 
 export type ReoonEmailStatus =
   | 'valid'
@@ -88,7 +89,7 @@ export function statusAfterEmailCleansing(currentStatus: LeadStatus, emailValid:
 }
 
 export async function verifyLeadEmail(email: string): Promise<EmailCleansingResult | null> {
-  const response = await fetch('/api/email/verify', {
+  const response = await authFetch('/api/email/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),

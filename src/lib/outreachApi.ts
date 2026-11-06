@@ -1,4 +1,5 @@
 import type { Lead, SequenceTask } from '@/types'
+import { authFetch } from '@/lib/authFetch'
 import { resolveOutreachCompany, resolveOutreachSignal } from '@/lib/outreach'
 
 export function isEmailReady(task: SequenceTask, lead?: Pick<Lead, 'email'>): boolean {
@@ -6,7 +7,7 @@ export function isEmailReady(task: SequenceTask, lead?: Pick<Lead, 'email'>): bo
 }
 
 export async function requestProspectingDraft(lead: Lead, task: SequenceTask) {
-  const response = await fetch('/api/ai/prospecting-draft', {
+  const response = await authFetch('/api/ai/prospecting-draft', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -30,7 +31,7 @@ export async function requestProspectingDraft(lead: Lead, task: SequenceTask) {
 }
 
 export async function requestAutoSendEmail(sequenceTaskId: string) {
-  const response = await fetch('/api/email/auto-send', {
+  const response = await authFetch('/api/email/auto-send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sequence_task_id: sequenceTaskId }),
@@ -50,7 +51,7 @@ export async function requestSendEmail(
   leadId?: string,
   sequenceTaskId?: string,
 ) {
-  const response = await fetch('/api/email/send', {
+  const response = await authFetch('/api/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

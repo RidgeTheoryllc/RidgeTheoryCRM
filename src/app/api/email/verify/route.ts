@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireApiUser } from '@/lib/apiAuth'
 import {
   buildCleansingSummary,
   isReoonEmailValid,
@@ -34,6 +35,9 @@ async function parseReoonResponse(response: Response): Promise<ReoonVerifyRespon
 }
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiUser(request)
+  if (unauthorized) return unauthorized
+
   const apiKey = process.env.REOON_API_KEY
   if (!apiKey) {
     return NextResponse.json(
