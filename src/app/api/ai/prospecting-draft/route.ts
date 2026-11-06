@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
+import { requireApiUser } from '@/lib/apiAuth'
 import { buildEmailPs, buildEmailSignoff, sanitizeEmailSubject } from '@/lib/outreach'
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiUser(request)
+  if (unauthorized) return unauthorized
+
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
     return NextResponse.json({ error: 'OPENAI_API_KEY is not configured' }, { status: 400 })

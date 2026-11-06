@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
+import { requireApiUser } from '@/lib/apiAuth'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { resolveOutreachFromEmail, sendSequenceEmail } from '@/lib/sendSequenceEmail'
 import { textToTrackingHtml } from '@/lib/resendEmail'
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiUser(request)
+  if (unauthorized) return unauthorized
+
   const apiKey = process.env.RESEND_API_KEY
   const from = resolveOutreachFromEmail()
 

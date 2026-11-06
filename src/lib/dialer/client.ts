@@ -3,17 +3,10 @@
 // ─────────────────────────────────────────────────────────────
 
 import type { Call } from '@twilio/voice-sdk'
-import { supabase } from '@/lib/supabase'
+import { authFetch } from '@/lib/authFetch'
 
 /** fetch() that sends the Supabase session so dialer APIs know which rep is calling. */
-export async function dialerFetch(input: string, init: RequestInit = {}) {
-  const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } }
-  const token = data.session?.access_token
-  const headers = new Headers(init.headers)
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  return fetch(input, { ...init, headers })
-}
+export const dialerFetch = authFetch
 
 export async function dialerJson<T>(input: string, init: RequestInit = {}): Promise<T> {
   const response = await dialerFetch(input, init)

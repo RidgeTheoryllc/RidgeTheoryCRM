@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server'
+import { requireApiUser } from '@/lib/apiAuth'
 import { autoSendSequenceTask } from '@/lib/autoSendSequenceEmail'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export async function POST(request: Request) {
+  const unauthorized = await requireApiUser(request)
+  if (unauthorized) return unauthorized
+
   const supabase = getSupabaseAdmin()
   if (!supabase) {
     return NextResponse.json(

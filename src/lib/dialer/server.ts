@@ -5,6 +5,7 @@
 import twilio from 'twilio'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+export { getRequestUserId } from '@/lib/apiAuth'
 import { getDidCallsToday, pickBestDid, updateDidScoreAfterCall } from './didEngine'
 import { extractAreaCode, normalizePhone, toFixedNum } from './phone'
 import type { CallResult, DidRecord } from './types'
@@ -15,18 +16,6 @@ export function requireAdmin(): SupabaseClient {
     throw new Error('Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.')
   }
   return supabase
-}
-
-/** Resolves the signed-in rep from the `Authorization: Bearer <access token>` header. */
-export async function getRequestUserId(request: Request): Promise<string | null> {
-  const header = request.headers.get('authorization') ?? ''
-  const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : ''
-  if (!token) return null
-  const supabase = getSupabaseAdmin()
-  if (!supabase) return null
-  const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user) return null
-  return data.user.id
 }
 
 export function agentIdentity(userId: string): string {
